@@ -100,6 +100,12 @@ export function buildPatientHistory(evidence: PatientEvidence): PatientHistoryEn
      * A refused write is the safety mechanism firing, so the summary says what was prevented rather
      * than merely that something failed. `rowVersionAtWrite` is read inside the same transaction as
      * the refused update, which is what makes this a measurement and not an inference.
+     *
+     * Deliberately silent about the score. Both adapters record `scoreWritten` as null on a refused
+     * write — the column means "what landed", and a refused write landed nothing. The refused *value*
+     * lives on the conflict row as `oldScore`, and the CONFLICT entry that follows carries it. A live
+     * check caught the alternative: this line read "Score — was refused", an em dash exactly where a
+     * reader expects the number, which looks like a missing value rather than a deliberate one.
      */
     push(
       {
@@ -107,9 +113,8 @@ export function buildPatientHistory(evidence: PatientEvidence): PatientHistoryEn
         version: write.guardVersion,
         at: write.createdAt,
         summary:
-          `Stale write blocked: computed from v${write.guardVersion}, but the record had already ` +
-          `reached v${write.rowVersionAtWrite}. Score ${write.scoreWritten ?? '—'} was refused.`,
-        ...(write.scoreWritten === null ? {} : { rejectedScore: write.scoreWritten }),
+          `Stale write blocked: the result computed from v${write.guardVersion} was refused because ` +
+          `the record had already reached v${write.rowVersionAtWrite}.`,
       },
       write.id,
     );

@@ -28,6 +28,7 @@ import { RecoveryEngine } from '../engine/RecoveryEngine';
 import { VerificationEngine } from '../verify/VerificationEngine';
 import {
   JOB_ACTION,
+  SETTLED_STATUSES,
   isActivelyProcessing,
   isDatasetLocked,
   resolveVerificationResult,
@@ -126,6 +127,14 @@ export class SimulationOrchestrator {
   private accumulatedEventCounters = { conflicts: 0, protectedUpdates: 0, staleBlocked: 0 };
 
   private lastRecoverySummary: RecoverySummary | null = null;
+
+  /**
+   * Counters read back from storage when a finished run is restored after a restart.
+   *
+   * Null at every other time, which is what keeps `metrics: null` meaning "nothing was measured" rather
+   * than "nothing is in memory".
+   */
+  private restoredMetrics: JobMetrics | null = null;
 
   /**
    * The most recent audit.
@@ -232,9 +241,15 @@ export class SimulationOrchestrator {
    * cannot disagree.
    */
   private async buildMetrics(): Promise<JobMetrics | null> {
-    // No engine means no run, and therefore no metrics. Reporting zeros here would be a claim about a
-    // measurement that was never taken.
-    if (!this.engine) return null;
+    /**
+     * No engine means no live run.
+     *
+     * Usually that also means no metrics, and reporting zeros would be a claim about a measurement nobody
+     * took. The one exception is a run restored from storage after a process restart: the counters really
+     * were measured, they are simply not in this process's memory. `restoredMetrics` is null in every other
+     * case, so the distinction stays honest.
+     */
+    if (!this.engine) return this.restoredMetrics;
 
     const engineMetrics = this.engine.getMetrics();
 
@@ -310,6 +325,84 @@ export class SimulationOrchestrator {
     return byPartition;
   }
 
+  // ------------------------------------------------------------------ restart recovery
+
+  /**
+   * Restores a finished run's state from storage at startup.
+   *
+   * ## The problem this solves
+   *
+   * Job status and the cached verification report live in memory. Restart the process after a completed,
+   * audited run and the database still holds the job row, every ledger and 1,000 scored patients — while the
+   * application claims no job has ever been started. A live check found the consequence: the report page said
+   * "verification has not been run", and re-running it was *refused*, because verification is only allowed
+   * from a settled state and the in-memory status had reverted to IDLE. The audit of a finished run became
+   * unreachable without redoing the whole run.
+   *
+   * ## Why only settled runs
+   *
+   * A job recorded as RUNNING, PAUSED or RECOVERING was interrupted mid-flight, and its engine — the batch
+   * positions, the in-flight window — existed only in the dead process. There is nothing to resume, so
+   * presenting it as resumable would be false. Those are left at IDLE with the situation reported, and the
+   * operator can reset or start again. Only genuinely finished runs are restored, because for those the
+   * database holds everything that matters.
+   *
+   * Returns the restored status, or null when there was nothing to restore.
+   */
+  async restore(): Promise<JobStatus | null> {
+    const job = await this.deps.jobs.findLatest();
+    if (!job) return null;
+
+    this.jobId = job.jobId;
+    this.settings = { ...job.settings };
+
+    if (!SETTLED_STATUSES.includes(job.status) || job.status === JOB_STATUS.IDLE) {
+      // Nothing resumable. Deliberately not silent: the reason is worth surfacing on the dashboard.
+      this.failureReason =
+        `A previous run was interrupted while ${job.status} and cannot be resumed — its engine state ` +
+        `did not survive the restart. Reset or start a new backfill; the dataset is intact.`;
+      return null;
+    }
+
+    this.status = job.status;
+    this.startedAt = job.startedAt;
+    this.crashedAt = job.crashedAt;
+    this.recoveredAt = job.recoveredAt;
+    this.completedAt = job.completedAt;
+    this.failureReason = job.failureReason;
+
+    /**
+     * Rebuilt from the persisted counters, with per-record progress re-derived from the ledger.
+     *
+     * The ledger is authoritative for coverage — the same source `buildMetrics` uses during a live run — so
+     * the restored numbers are the ones the audit will agree with, not a stale snapshot of them.
+     */
+    const ledger = await this.deps.patients.listConsiderations(this.jobId);
+    const conflicts = await this.deps.patients.listConflicts(this.jobId);
+
+    this.restoredMetrics = {
+      eligibleRecords: job.eligibleRecords,
+      processed: ledger.length,
+      applied: job.applied,
+      noopAlreadyCurrent: job.noopAlreadyCurrent,
+      conflicts: conflicts.length,
+      reevaluated: conflicts.filter(
+        (conflict) => conflict.resolution === CONFLICT_RESOLUTION.REEVALUATED,
+      ).length,
+      protectedUpdates: job.protectedUpdates,
+      staleWriteAttemptsBlocked: job.staleBlocked,
+      failed: job.failed,
+      currentPartition: job.currentPartition,
+      currentRecordIndex: job.currentRecordIndex,
+      percentComplete:
+        job.eligibleRecords === 0
+          ? 0
+          : Math.min(100, Math.round((ledger.length / job.eligibleRecords) * 1000) / 10),
+    };
+
+    return this.status;
+  }
+
   // ------------------------------------------------------------------ controls
 
   /**
@@ -340,6 +433,20 @@ export class SimulationOrchestrator {
       );
     }
 
+    /**
+     * Discard the previous run's evidence for this job id before anything measures anything.
+     *
+     * Every run reuses one job id, and coverage is ledger rows over eligible records — so without this a
+     * second run inherits the first run's ledger and reports 100% coverage before reading a single record. A
+     * test caught exactly that: `processed` came back as the full dataset at tick zero.
+     *
+     * Narrower than a reset on purpose. The online-update log, the event log and each patient's derived block
+     * survive, because a record's clinical edit history belongs to the record rather than to any one run — and
+     * it is what makes the per-patient timeline worth reading across runs.
+     */
+    await this.deps.patients.clearRunEvidence(this.jobId);
+    await this.deps.jobs.deleteCheckpoints(this.jobId);
+
     await this.deps.jobs.create({
       jobId: this.jobId,
       mode: BACKFILL_MODE.GUARDED,
@@ -369,6 +476,9 @@ export class SimulationOrchestrator {
     this.failureReason = null;
     this.accumulatedEventCounters = { conflicts: 0, protectedUpdates: 0, staleBlocked: 0 };
     this.lastRecoverySummary = null;
+
+    // A live engine now owns the numbers; anything restored from a previous process describes history.
+    this.restoredMetrics = null;
 
     /**
      * Discard the previous run's audit.
@@ -763,6 +873,7 @@ export class SimulationOrchestrator {
     this.engine = null;
     this.lastReport = null;
     this.lastRecoverySummary = null;
+    this.restoredMetrics = null;
     this.accumulatedEventCounters = { conflicts: 0, protectedUpdates: 0, staleBlocked: 0 };
     this.startedAt = null;
     this.completedAt = null;

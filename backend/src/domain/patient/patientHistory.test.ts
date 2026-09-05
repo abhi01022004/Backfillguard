@@ -80,10 +80,43 @@ describe('buildPatientHistory', () => {
     });
 
     expect(history[0]!.kind).toBe('WRITE_REJECTED');
-    expect(history[0]!.rejectedScore).toBe(48);
     expect(history[0]!.summary).toContain('v2');
     expect(history[0]!.summary).toContain('v3');
     expect(history[0]!.summary).toMatch(/blocked/i);
+
+    /**
+     * No score is claimed here.
+     *
+     * Both adapters store `scoreWritten` as null on a refused write, because the column means "what
+     * landed". Printing it produced "Score — was refused" — an em dash exactly where a reader expects a
+     * number. The refused value belongs to the conflict row, and the CONFLICT entry carries it.
+     */
+    expect(history[0]!.summary).not.toContain('—');
+    expect(history[0]!.rejectedScore).toBeUndefined();
+  });
+
+  it('carries the refused score on the conflict entry, where it is actually recorded', () => {
+    const history = buildPatientHistory({
+      ...emptyEvidence(),
+      conflicts: [
+        {
+          id: 5,
+          jobId: JOB,
+          patientId: PATIENT,
+          patientCode: 'P0042',
+          sourceVersion: 2,
+          currentVersion: 3,
+          oldScore: 48,
+          newScore: 63,
+          changedFields: [{ field: 'glucose', from: 118, to: 210 }],
+          resolution: CONFLICT_RESOLUTION.REEVALUATED,
+          detectedAt: '2026-09-05T10:00:00.000Z',
+          resolvedAt: '2026-09-05T10:00:00.200Z',
+        },
+      ],
+    });
+
+    expect(history.find((entry) => entry.kind === 'CONFLICT')!.rejectedScore).toBe(48);
   });
 
   it('flags an unguarded write, so a naive-engine run cannot be mistaken for a safe one', () => {

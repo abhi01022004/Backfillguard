@@ -142,6 +142,10 @@ export class InMemoryJobRepository implements JobRepository {
     return count;
   }
 
+  async deleteCheckpoints(jobId: string): Promise<void> {
+    this.checkpoints = this.checkpoints.filter((checkpoint) => checkpoint.jobId !== jobId);
+  }
+
   async deleteAll(): Promise<void> {
     this.jobs.clear();
     this.checkpoints = [];

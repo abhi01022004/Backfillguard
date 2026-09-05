@@ -269,4 +269,20 @@ export interface PatientRepository {
 
   /** Clears jobs, events, checkpoints, ledgers, conflicts, online updates and staged results. */
   clearSimulationState(): Promise<void>;
+
+  /**
+   * Clears one job's run evidence: considerations, write-ledger rows, conflicts and staged results.
+   *
+   * ## Why this exists separately from `clearSimulationState`
+   *
+   * Every run uses the same job id, so a second run would inherit the first run's ledger rows — and coverage
+   * is measured as ledger rows over eligible records. A live check found the result: starting a second backfill
+   * reported 100% coverage at tick zero, before a single record had been read. The headline number was simply
+   * describing the previous run.
+   *
+   * The narrower scope is the point. `clearSimulationState` also wipes the online-update log, the event log and
+   * every patient's derived block, which is right for a reset but wrong for a restart: the clinical edit history
+   * is what makes a record's timeline worth reading, and it belongs to the record rather than to any one run.
+   */
+  clearRunEvidence(jobId: string): Promise<void>;
 }

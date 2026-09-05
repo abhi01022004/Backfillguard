@@ -105,5 +105,15 @@ export interface JobRepository {
   /** Marks every checkpoint for the job LOST. Returns how many were affected. */
   loseCheckpoints(jobId: string): Promise<number>;
 
+  /**
+   * Removes every checkpoint for the job outright.
+   *
+   * Distinct from `loseCheckpoints`, and the difference matters. LOST is a *demo state* — the checkpoint
+   * existed, was deliberately destroyed, and the UI narrates "last known position" from it to show that
+   * recovery did not use it. Deleting is bookkeeping: a new run's checkpoints should not sit alongside a
+   * previous run's, or "last known position" would report a place this run never reached.
+   */
+  deleteCheckpoints(jobId: string): Promise<void>;
+
   deleteAll(): Promise<void>;
 }

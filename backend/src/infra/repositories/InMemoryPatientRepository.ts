@@ -458,6 +458,15 @@ export class InMemoryPatientRepository implements PatientRepository {
     }
   }
 
+  async clearRunEvidence(jobId: string): Promise<void> {
+    for (const key of [...this.considerations.keys()]) {
+      if (this.considerations.get(key)?.jobId === jobId) this.considerations.delete(key);
+    }
+    this.writes = this.writes.filter((write) => write.jobId !== jobId);
+    this.conflicts = this.conflicts.filter((conflict) => conflict.jobId !== jobId);
+    this.staged = this.staged.filter((entry) => entry.jobId !== jobId);
+  }
+
   async clearSimulationState(): Promise<void> {
     this.considerations.clear();
     this.writes = [];

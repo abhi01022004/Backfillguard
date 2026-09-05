@@ -643,6 +643,20 @@ export class PrismaPatientRepository implements PatientRepository {
     }
   }
 
+  async clearRunEvidence(jobId: string): Promise<void> {
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.writeLedger.deleteMany({ where: { jobId } });
+        await tx.considerationLedger.deleteMany({ where: { jobId } });
+        await tx.conflict.deleteMany({ where: { jobId } });
+        await tx.pendingResult.deleteMany({ where: { jobId } });
+        // Checkpoints are the job repository's concern; the orchestrator clears them alongside this.
+      });
+    } catch (cause) {
+      throw new DatabaseError(`clearing run evidence for job ${jobId}`, cause);
+    }
+  }
+
   async clearSimulationState(): Promise<void> {
     try {
       await this.prisma.$transaction(async (tx) => {

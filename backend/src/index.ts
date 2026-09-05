@@ -118,6 +118,18 @@ async function start(): Promise<void> {
     logger.warn('no patients found — run `npm run db:seed` to generate the synthetic dataset');
   }
 
+  /**
+   * Restore a finished run, so a restart does not make its audit unreachable.
+   *
+   * Without this the database keeps the job row, every ledger and all the scored patients while the process
+   * reports IDLE — and verification, which is only permitted from a settled state, refuses to run against
+   * data that is sitting right there.
+   */
+  const restored = await orchestrator.restore();
+  if (restored) {
+    logger.info('restored previous run from storage', { status: restored });
+  }
+
   httpServer.listen(env.PORT, () => {
     logger.info('BackfillGuard backend listening', {
       port: env.PORT,

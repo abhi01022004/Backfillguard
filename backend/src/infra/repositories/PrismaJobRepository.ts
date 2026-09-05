@@ -231,6 +231,10 @@ export class PrismaJobRepository implements JobRepository {
     return result.count;
   }
 
+  async deleteCheckpoints(jobId: string): Promise<void> {
+    await this.prisma.checkpoint.deleteMany({ where: { jobId } });
+  }
+
   async deleteAll(): Promise<void> {
     await this.prisma.backfillJob.deleteMany();
   }

@@ -614,6 +614,66 @@ export function runPatientRepositoryContract(harness: ContractHarness): void {
       expect(await repository.countAll()).toBe(30);
     });
 
+    it('clears one job\'s run evidence while keeping the clinical edit history', async () => {
+      /**
+       * The narrow clear used when a new run starts.
+       *
+       * Every run reuses one job id and coverage is ledger rows over eligible records, so without this a
+       * second run would inherit the first run's ledger and report full coverage before reading anything. The
+       * online-update log must survive: a record's clinical history belongs to the record, not to a run.
+       */
+      const target = patients[19]!;
+
+      await repository.applyOnlineUpdate(
+        target.id,
+        target.version,
+        { glucose: 188 },
+        ACTOR_TYPE.LAB,
+        UPDATE_SOURCE.AUTO,
+      );
+      await repository.applyGuarded(
+        target.id,
+        target.version + 1,
+        { riskScore: 55, riskLevel: RISK_LEVEL.MEDIUM, backfillStatus: BACKFILL_STATUS.COMPLETED },
+        LEDGER,
+      );
+      await repository.recordConsideration({
+        jobId: JOB,
+        patientId: target.id,
+        outcome: CONSIDERATION_OUTCOME.APPLIED,
+        sourceVersion: target.version + 1,
+        appliedVersion: target.version + 1,
+        attempts: 1,
+        phase: 'INITIAL',
+        reason: null,
+      });
+      await repository.recordConsideration({
+        jobId: 'OTHER-JOB',
+        patientId: target.id,
+        outcome: CONSIDERATION_OUTCOME.APPLIED,
+        sourceVersion: target.version + 1,
+        appliedVersion: target.version + 1,
+        attempts: 1,
+        phase: 'INITIAL',
+        reason: null,
+      });
+
+      await repository.clearRunEvidence(JOB);
+
+      expect(await repository.consideredPatientIds(JOB)).toEqual([]);
+      expect(await repository.listWriteLedger(JOB)).toEqual([]);
+      expect(await repository.listConflicts(JOB)).toEqual([]);
+
+      // Scoped to one job: another job's evidence is untouched.
+      expect(await repository.consideredPatientIds('OTHER-JOB')).toEqual([target.id]);
+
+      // And the clinical record itself is intact, including its edit history and derived block.
+      const after = (await repository.findById(target.id))!;
+      expect(after.glucose).toBe(188);
+      expect(after.riskScore).toBe(55);
+      expect(await repository.listOnlineUpdates(target.id)).toHaveLength(1);
+    });
+
     it('marks status without touching version or clinical data', async () => {
       const target = patients[16]!;
       await repository.markStatus(target.id, BACKFILL_STATUS.PROCESSING);
