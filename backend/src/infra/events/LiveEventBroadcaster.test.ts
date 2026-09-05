@@ -204,7 +204,7 @@ describe('LiveEventBroadcaster', () => {
     const payload = frame.payload as BackfillJobState;
 
     expect(payload.jobId).toBe('BG-DEMO-001');
-    expect(payload.metrics.processed).toBe(10);
+    expect(payload.metrics!.processed).toBe(10);
     // Status and checkpoint are why the client needs full state rather than metrics alone.
     expect(payload.status).toBe('RUNNING');
     expect(payload).toHaveProperty('checkpoint');

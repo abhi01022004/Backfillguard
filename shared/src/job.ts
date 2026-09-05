@@ -46,7 +46,15 @@ export interface BackfillJobState {
   mode: BackfillMode;
   seed: number;
   settings: SimulationSettings;
-  metrics: JobMetrics;
+  /**
+   * Null when no run has been started or after a reset.
+   *
+   * Metrics describe a *run*, so with no run there are no metrics — and saying so is more accurate than
+   * reporting zeros. A zeroed `eligibleRecords` in particular would be simply false: the dataset still holds
+   * its patients, there is just nothing measuring them yet. A live check caught exactly that, with the
+   * dashboard showing "Total patients: 0" over a seeded 1,000-record dataset.
+   */
+  metrics: JobMetrics | null;
   partitions: PartitionProgress[];
   /** Number of staged, computed-but-unwritten results. Non-zero after a crash. */
   pendingResultCount: number;

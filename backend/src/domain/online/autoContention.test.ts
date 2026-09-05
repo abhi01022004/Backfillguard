@@ -81,7 +81,7 @@ describe('automatic online updates against a running backfill', () => {
 
     expect(orchestrator.getStatus()).toBe(JOB_STATUS.COMPLETED);
 
-    const metrics = (await orchestrator.getState()).metrics;
+    const metrics = (await orchestrator.getState()).metrics!;
 
     // The stream must actually collide with in-flight records, otherwise the guard is never tested.
     expect(events.countOfType(EVENT_TYPE.ONLINE_UPDATE)).toBeGreaterThan(0);
@@ -183,8 +183,8 @@ describe('automatic online updates against a running backfill', () => {
       strategy: TARGET_STRATEGY.RANDOM,
     });
 
-    const focusedConflicts = (await focused.orchestrator.getState()).metrics.conflicts;
-    const uniformConflicts = (await uniform.orchestrator.getState()).metrics.conflicts;
+    const focusedConflicts = (await focused.orchestrator.getState()).metrics!.conflicts;
+    const uniformConflicts = (await uniform.orchestrator.getState()).metrics!.conflicts;
 
     expect(focusedConflicts).toBeGreaterThan(uniformConflicts);
 
@@ -202,6 +202,6 @@ describe('automatic online updates against a running backfill', () => {
     const { events, orchestrator } = await runWithAutoUpdates({ updatesPerHundred: 0 });
 
     expect(events.countOfType(EVENT_TYPE.ONLINE_UPDATE)).toBe(0);
-    expect((await orchestrator.getState()).metrics.conflicts).toBe(0);
+    expect((await orchestrator.getState()).metrics!.conflicts).toBe(0);
   });
 });

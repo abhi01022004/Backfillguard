@@ -76,8 +76,9 @@ export function createApp(deps: AppDeps): Express {
     '/api',
     createDatasetRouter({
       repository: deps.repository,
-      // Destructive dataset operations are refused while a run owns the data (R2.8).
+      // Reseeding is refused while a run owns the data (R2.8). Reset is not, by design.
       isJobRunning: () => deps.orchestrator.isDatasetLocked(),
+      resetOrchestrator: () => deps.orchestrator.reset(),
     }),
   );
 

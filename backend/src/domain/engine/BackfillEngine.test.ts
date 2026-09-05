@@ -132,7 +132,7 @@ describe('BackfillEngine (uncontended)', () => {
 
     expect(harness.orchestrator.getStatus()).toBe(JOB_STATUS.COMPLETED);
 
-    const metrics = (await harness.orchestrator.getState()).metrics;
+    const metrics = (await harness.orchestrator.getState()).metrics!;
     expect(metrics.eligibleRecords).toBe(TOTAL);
     expect(metrics.processed).toBe(TOTAL);
     expect(metrics.applied).toBe(TOTAL);
@@ -261,7 +261,7 @@ describe('BackfillEngine (contended)', () => {
     await harness.orchestrator.start({}, { autoAdvance: false });
     await harness.orchestrator.runToCompletion();
 
-    const metrics = (await harness.orchestrator.getState()).metrics;
+    const metrics = (await harness.orchestrator.getState()).metrics!;
     expect(metrics.conflicts).toBe(1);
     expect(metrics.staleWriteAttemptsBlocked).toBe(1);
     expect(metrics.protectedUpdates).toBe(1);
@@ -425,7 +425,7 @@ describe('BackfillEngine (contended)', () => {
     await harness.orchestrator.start({}, { autoAdvance: false });
     await harness.orchestrator.runToCompletion();
 
-    const metrics = (await harness.orchestrator.getState()).metrics;
+    const metrics = (await harness.orchestrator.getState()).metrics!;
     expect(metrics.conflicts).toBeGreaterThan(0);
     expect(metrics.reevaluated).toBe(metrics.conflicts);
     expect(metrics.failed).toBe(0);

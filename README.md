@@ -41,7 +41,8 @@ task.
 | C | Checkpoints, crash injection, evidence-based recovery | Done |
 | C | Independent verification engine | Done |
 | C | Naive backfill comparison | Done |
-| D | Real-time event stream and dashboard | Next |
+| D | Live event transport, dashboard shell, KPIs, progress | Done |
+| D | Partition grid, event timeline, patient views, controls | Next |
 | D | Real-time event stream and dashboard | Planned |
 | E | One-click demo, naive comparison, verification report | Planned |
 | F | Test suite, security audit, polish, documentation | Planned |

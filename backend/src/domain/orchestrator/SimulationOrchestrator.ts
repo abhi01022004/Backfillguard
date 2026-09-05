@@ -3,6 +3,7 @@ import {
   DEMO_JOB_ID,
   EVENT_SEVERITY,
   EVENT_TYPE,
+  CONFLICT_RESOLUTION,
   CONSIDERATION_OUTCOME,
   JOB_STATUS,
   PARTITION_STATE,
@@ -230,37 +231,27 @@ export class SimulationOrchestrator {
    * This also means the dashboard and the verification report read the same source of truth, so they
    * cannot disagree.
    */
-  private async buildMetrics(): Promise<JobMetrics> {
-    const engineMetrics = this.engine?.getMetrics() ?? {
-      eligibleRecords: 0,
-      processed: 0,
-      applied: 0,
-      noopAlreadyCurrent: 0,
-      conflicts: 0,
-      reevaluated: 0,
-      protectedUpdates: 0,
-      staleWriteAttemptsBlocked: 0,
-      failed: 0,
-      currentPartition: 0,
-      currentRecordIndex: 0,
-      percentComplete: 0,
-    };
+  private async buildMetrics(): Promise<JobMetrics | null> {
+    // No engine means no run, and therefore no metrics. Reporting zeros here would be a claim about a
+    // measurement that was never taken.
+    if (!this.engine) return null;
 
-    if (!this.engine) return engineMetrics;
+    const engineMetrics = this.engine.getMetrics();
 
     const ledger = await this.deps.patients.listConsiderations(this.jobId);
+    const conflicts = await this.deps.patients.listConflicts(this.jobId);
 
-    const outcomes = { applied: 0, noop: 0, reevaluated: 0, failed: 0, skipped: 0 };
+    const outcomes = { applied: 0, noop: 0, failed: 0, skipped: 0 };
     for (const entry of ledger) {
       switch (entry.outcome) {
         case CONSIDERATION_OUTCOME.APPLIED:
+        case CONSIDERATION_OUTCOME.REEVALUATED_APPLIED:
+          // Both are "a fresh result was written". They are separated in the ledger for provenance, but as
+          // a progress number they are the same thing.
           outcomes.applied += 1;
           break;
         case CONSIDERATION_OUTCOME.NO_ACTION_ALREADY_CURRENT:
           outcomes.noop += 1;
-          break;
-        case CONSIDERATION_OUTCOME.REEVALUATED_APPLIED:
-          outcomes.reevaluated += 1;
           break;
         case CONSIDERATION_OUTCOME.FAILED:
           outcomes.failed += 1;
@@ -282,9 +273,20 @@ export class SimulationOrchestrator {
       processed,
       applied: outcomes.applied,
       noopAlreadyCurrent: outcomes.noop,
-      reevaluated: outcomes.reevaluated,
+      /**
+       * Counted from resolved conflicts, matching the verification engine exactly.
+       *
+       * Reading this from ledger outcomes under-reported it, because the ledger holds each record's *final*
+       * decision: a record re-evaluated before a crash and then found already-current by recovery ends as
+       * NO_ACTION_ALREADY_CURRENT. A live check caught the visible symptom — the dashboard card showed 3
+       * while the audit of the same run showed 6. Two surfaces labelled "Re-evaluated" disagreeing is
+       * exactly the kind of thing that makes a judge stop trusting every other number on the page.
+       */
+      reevaluated: conflicts.filter(
+        (conflict) => conflict.resolution === CONFLICT_RESOLUTION.REEVALUATED,
+      ).length,
       failed: outcomes.failed,
-      conflicts: events.conflicts + engineCounters.conflicts,
+      conflicts: conflicts.length,
       protectedUpdates: events.protectedUpdates + engineCounters.protectedUpdates,
       staleWriteAttemptsBlocked: events.staleBlocked + engineCounters.staleBlocked,
       currentPartition: engineMetrics.currentPartition,
@@ -367,6 +369,15 @@ export class SimulationOrchestrator {
     this.failureReason = null;
     this.accumulatedEventCounters = { conflicts: 0, protectedUpdates: 0, staleBlocked: 0 };
     this.lastRecoverySummary = null;
+
+    /**
+     * Discard the previous run's audit.
+     *
+     * Without this, starting a new backfill left the old verification report available, so the dashboard
+     * showed an audited "coverage 100%" while the new run was only 140 records in. A report describes one
+     * run; the moment a new run starts, it describes history.
+     */
+    this.lastReport = null;
 
     this.checkpoints = new CheckpointManager({
       jobs: this.deps.jobs,
@@ -732,15 +743,54 @@ export class SimulationOrchestrator {
   }
 
   /**
+   * Returns the orchestrator to a clean slate (R2.8, R17.5).
+   *
+   * Clearing `lastReport` is the part that matters. A verification report describes one specific run, and a
+   * live check found the consequence of keeping it: after a reset the dashboard still showed
+   * "Coverage 100% — independently verified" from a run whose data had been wiped. An audited number
+   * attached to the wrong run is worse than no number, because it carries the authority of having been
+   * checked.
+   *
+   * RESET is permitted from every state by design — it is the escape hatch that must always work, including
+   * out of a job wedged mid-demo.
+   */
+  async reset(): Promise<void> {
+    const next = transition(JOB_ACTION.RESET, this.status);
+
+    this.status = next;
+    await this.awaitLoopStop();
+
+    this.engine = null;
+    this.lastReport = null;
+    this.lastRecoverySummary = null;
+    this.accumulatedEventCounters = { conflicts: 0, protectedUpdates: 0, staleBlocked: 0 };
+    this.startedAt = null;
+    this.completedAt = null;
+    this.crashedAt = null;
+    this.recoveredAt = null;
+    this.failureReason = null;
+    this.checkpoints.reset();
+
+    this.deps.events.emit({
+      type: EVENT_TYPE.SIMULATION_RESET,
+      severity: EVENT_SEVERITY.INFO,
+      jobId: this.jobId,
+      message: 'Simulation reset. Dataset retained; all job state, ledgers and audit results cleared.',
+    });
+
+    await this.deps.events.flush();
+  }
+
+  /**
    * Persists the same numbers the API reports.
    *
    * Deliberately goes through `buildMetrics` rather than reading engine counters directly, so the
    * stored job row, the dashboard and the verification report can never disagree about a run.
    */
   private async persistCounters(): Promise<void> {
-    if (!this.engine) return;
-
     const metrics = await this.buildMetrics();
+    // Null means no engine, so there is nothing to persist.
+    if (!metrics) return;
 
     await this.deps.jobs.saveCounters(this.jobId, {
       processed: metrics.processed,
@@ -807,7 +857,8 @@ export class SimulationOrchestrator {
       completedAt: this.completedAt,
     });
 
-    const metrics = await this.buildMetrics();
+    // Non-null here: `complete()` is only reachable with an engine present.
+    const metrics = (await this.buildMetrics())!;
 
     this.deps.events.emit({
       type: EVENT_TYPE.BACKFILL_COMPLETED,
