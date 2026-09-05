@@ -357,7 +357,7 @@ evidence instead of guessing.
 
 **Acceptance criteria**
 
-1. THE SYSTEM SHALL provide a single **Run Winning Demo** action that executes the full scripted scenario end to end without further input.
+1. THE SYSTEM SHALL provide a single **Run Demo** action that executes the full scripted scenario end to end without further input.
 2. THE SCENARIO SHALL perform, in order: seed, start backfill, process several partitions, apply scripted online updates to predefined patients, continue processing, crash, lose checkpoint, resume recovery, detect conflicts, re-evaluate changed records, complete remaining records, run verification, display the result.
 3. THE SCENARIO SHALL be keyed to processed-record counts rather than wall-clock time so ordering is independent of machine speed.
 4. WHEN the scenario completes THEN it SHALL have produced at least 1 online update, at least 1 version conflict, at least 1 re-evaluation, exactly 1 checkpoint-loss episode, 1 successful recovery, `staleOverwrites == 0`, and `coveragePercent == 100`.

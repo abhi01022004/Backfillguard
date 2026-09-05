@@ -117,7 +117,7 @@ export function DemoRunner({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 max-w-2xl">
           <h2 id="demo-heading" className="text-lg font-semibold text-slate-900">
-            Run the winning demo
+            Run the demo
           </h2>
           <p className="mt-1 text-sm text-slate-600">
             One click runs the whole argument end to end against live clinical traffic, in{' '}
@@ -153,7 +153,7 @@ export function DemoRunner({
             ) : (
               <PlayCircle className="h-5 w-5" aria-hidden="true" />
             )}
-            {running ? 'Demo running…' : 'RUN WINNING DEMO'}
+            {running ? 'Demo running…' : 'RUN DEMO'}
           </button>
 
           {running ? (

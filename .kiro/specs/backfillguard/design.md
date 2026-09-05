@@ -778,7 +778,7 @@ Recharts, TanStack Query for REST, a `useLiveStream` hook for the socket.
 **Pages**
 
 1. **Dashboard** — the 30-second view (R14, R24): header + disclaimer banner, job state badge,
-   `RUN WINNING DEMO` above the fold, 7 KPI cards, progress panel, partition grid, event timeline,
+   `RUN DEMO` above the fold, 7 KPI cards, progress panel, partition grid, event timeline,
    conflict list, recovery timeline, verification result card.
 2. **Patients** — filterable table + detail drawer with version history (R16).
 3. **Comparison** — naive vs guarded, spotlight patient callout, Recharts bar chart (R12, R19).

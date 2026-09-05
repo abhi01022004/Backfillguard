@@ -21,7 +21,7 @@ Open **http://localhost:5173**. Check three things:
 
 1. The header shows **Backend connected**.
 2. The dashboard shows **1,000** total patients.
-3. The **RUN WINNING DEMO** button is enabled.
+3. The **RUN DEMO** button is enabled.
 
 Press **Reset simulation** if a previous run is on screen. The scripted demo resets on its own, so this is
 belt and braces.
@@ -51,7 +51,7 @@ eleven-patient conflict set. Budget 15 seconds of silence and narrate over it.
 
 ### 0:25 — 0:40 · Start the demo
 
-*Press **RUN WINNING DEMO**.*
+*Press **RUN DEMO**.*
 
 > "One click runs the whole thing: start the backfill, let clinical staff collide with it, crash it mid-batch,
 > destroy its checkpoint, recover, and audit the result. Twelve seconds. Every step fires on a record count,
@@ -186,7 +186,7 @@ Everything above, plus these four insertions.
 
 ### At the end — determinism and limits *(60 seconds)*
 
-*Press **RUN WINNING DEMO** again.*
+*Press **RUN DEMO** again.*
 
 > "Same eleven patients conflict. Same scores. That is not luck — the dataset is regenerated from the seed and
 > every random stream is reset, so a repeated run is a genuine replay rather than a fresh run with the same

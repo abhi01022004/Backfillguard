@@ -386,7 +386,7 @@ describe('DemoRunner', () => {
 
   it('leads with the one-click action', () => {
     render(<DemoRunner scenario={null} controls={makeControls()} patientCount={1000} />);
-    expect(screen.getByRole('button', { name: /RUN WINNING DEMO/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /RUN DEMO/ })).toBeEnabled();
   });
 
   it('lists what the demo guarantees', () => {
@@ -400,7 +400,7 @@ describe('DemoRunner', () => {
   it('refuses to run against an empty dataset and says why', () => {
     render(<DemoRunner scenario={null} controls={makeControls()} patientCount={0} />);
 
-    expect(screen.getByRole('button', { name: /RUN WINNING DEMO/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /RUN DEMO/ })).toBeDisabled();
     expect(screen.getByText('The dataset is empty. Seed it before running the demo.')).toBeInTheDocument();
   });
 
@@ -484,7 +484,7 @@ describe('DemoRunner', () => {
     const controls = makeControls();
     render(<DemoRunner scenario={null} controls={controls} patientCount={1000} />);
 
-    await userEvent.click(screen.getByRole('button', { name: /RUN WINNING DEMO/ }));
+    await userEvent.click(screen.getByRole('button', { name: /RUN DEMO/ }));
     expect(controls.runDemo).toHaveBeenCalled();
   });
 });

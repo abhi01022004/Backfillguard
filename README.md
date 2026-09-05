@@ -314,7 +314,7 @@ npm run dev
 - Frontend — **http://localhost:5173**
 - Backend health — http://localhost:4000/api/health
 
-Then press **RUN WINNING DEMO**, above the fold on the dashboard. It takes **about 12 seconds** and runs the
+Then press **RUN DEMO**, above the fold on the dashboard. It takes **about 12 seconds** and runs the
 whole argument: start, two in-flight collisions, a crash mid-batch, a clinical update during the outage,
 checkpoint destruction, evidence-based recovery, and the independent audit.
 

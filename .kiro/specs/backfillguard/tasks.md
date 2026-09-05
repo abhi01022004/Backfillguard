@@ -286,7 +286,7 @@ satisfies and the tasks it depends on. Backend correctness (tasks 1–12) lands 
     - _Requirements: R18.4, R18.6_
   - [x] 19.4 Add `POST /api/scenario/demo`, `POST /api/scenario/abort`, `GET /api/scenario/state`
     - _Requirements: R18.1_
-  - [x] 19.5 Build `DemoRunner`: the `RUN WINNING DEMO` button above the fold, the named step list with the current step highlighted, and disabling of conflicting manual controls while running
+  - [x] 19.5 Build `DemoRunner`: the `RUN DEMO` button above the fold, the named step list with the current step highlighted, and disabling of conflicting manual controls while running
     - _Requirements: R18.7, R18.8, R24.5_
   - [x] 19.6 **Test (integration):** the scenario runs headlessly and asserts every R18.4 outcome; running it twice from the same seed produces identical conflict counts, conflicted code sets, and final scores
     - _Requirements: R21.3, R21.4, R18.5_
@@ -378,7 +378,7 @@ satisfies and the tasks it depends on. Backend correctness (tasks 1–12) lands 
 
 - [x] 26. Definition-of-done verification
   - _Depends on: 25_
-  - [x] 26.1 On a clean checkout, run install → seed → `RUN WINNING DEMO` and confirm the full DoD sequence from requirements §8 executes
+  - [x] 26.1 On a clean checkout, run install → seed → `RUN DEMO` and confirm the full DoD sequence from requirements §8 executes
   - [x] 26.2 Confirm the final output reads Coverage = 100%, Missed Records = 0, Stale Overwrites = 0, Lost Online Updates = 0, STATUS = VERIFIED SAFE, with every number traced back to persisted state
   - [x] 26.3 Confirm the naive comparison on the same scenario reports `staleOverwrites > 0` and `lostOnlineUpdates > 0`
   - [x] 26.4 Confirm the full test suite passes from one root command

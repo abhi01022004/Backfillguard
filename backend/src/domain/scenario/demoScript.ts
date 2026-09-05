@@ -123,7 +123,7 @@ export interface DemoScript {
 }
 
 /**
- * The winning demo.
+ * The demo.
  *
  * The crash lands roughly a fifth of the way through, which is late enough for several checkpoints to
  * exist and early enough that recovery has real work to do afterwards. Both matter: the staged batch is
