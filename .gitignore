@@ -3,6 +3,10 @@ dist/
 build/
 coverage/
 
+# Generated Prisma client. Regenerated from the committed schema by the postinstall hook, so a fresh
+# clone gets it automatically and we avoid committing several MB of generated code.
+backend/src/generated/
+
 # Local environment overrides. .env.example is committed; real .env files are not.
 .env
 .env.local

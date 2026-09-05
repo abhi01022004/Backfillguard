@@ -4,6 +4,7 @@ import {
   SIMULATION_BOUNDS,
   type SimulationSettings,
 } from '@bg/shared';
+import { resolveDatabaseUrl } from './databaseUrl';
 
 /**
  * Environment configuration (R1.4).
@@ -29,7 +30,11 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   CORS_ORIGIN: z.string().min(1).default('http://localhost:5173'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error', 'silent']).default('info'),
-  DATABASE_URL: z.string().min(1).default('file:./data/backfillguard.db'),
+  /**
+   * Defaulted to an absolute path by `resolveDatabaseUrl()` rather than a literal, so the CLI and
+   * the running app can never disagree about which file the database is (see databaseUrl.ts).
+   */
+  DATABASE_URL: z.string().min(1).default(resolveDatabaseUrl()),
 
   SIM_SEED: z.coerce.number().int().default(DEFAULT_SEED),
   SIM_TOTAL_RECORDS: boundedNumber('totalRecords'),

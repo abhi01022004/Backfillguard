@@ -1,0 +1,316 @@
+// BackfillGuard data model.
+//
+// Enum-like columns are stored as String: SQLite has no native enum type, and the shared TypeScript
+// unions in @bg/shared are the single source of truth for their allowed values.
+//
+// The two ledger tables are the heart of the design. Coverage and safety are the claims this project
+// makes, so neither is left to a counter that could drift, be double-incremented or be reset:
+// ConsiderationLedger proves every record was decided upon, and WriteLedger proves no write landed
+// on a row that had moved underneath it.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// A synthetic patient record.
+///
+/// The version model is the crux of the whole system: `version` tracks *source data* only and is
+/// incremented exclusively by online updates. Backfill engines write the derived block
+/// (riskScore, riskLevel, backfillStatus, lastBackfillVersion) and never touch `version` or any
+/// clinical field. That is what makes `lastBackfillVersion == version` a meaningful, independently
+/// checkable statement rather than bookkeeping.
+model Patient {
+  id          Int    @id @default(autoincrement())
+  patientCode String @unique
+
+  // --- demographics (synthetic) ---
+  name String
+  age  Int
+
+  // --- clinical source fields: only online updates may change these ---
+  bloodPressureSystolic  Int
+  bloodPressureDiastolic Int
+  heartRate              Int
+  glucose                Int
+  diagnosis              String
+
+  partitionIndex Int
+
+  /// Source-data version. Incremented only by online updates, never by a backfill write.
+  version Int @default(1)
+
+  // --- derived block: written only by backfill engines ---
+  /// Null until the record has been scored.
+  riskScore      Int?
+  riskLevel      String?
+  backfillStatus String  @default("PENDING")
+
+  /// The source version `riskScore` was computed from.
+  /// `lastBackfillVersion < version` means the stored score predates the current data.
+  lastBackfillVersion Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  considerations ConsiderationLedger[]
+  writes         WriteLedger[]
+  conflicts      Conflict[]
+  onlineUpdates  OnlineUpdate[]
+  pendingResults PendingResult[]
+
+  // Partition-ordered scans are the engine's primary access pattern.
+  @@index([partitionIndex, id])
+  @@index([backfillStatus])
+  @@index([version])
+}
+
+/// One backfill run and its live counters.
+///
+/// These counters drive the dashboard, but they are deliberately *not* what verification trusts —
+/// the audit recomputes everything from the ledgers and the patient rows themselves.
+model BackfillJob {
+  id     String @id
+  status String
+  mode   String
+  seed   Int
+
+  /// Snapshot of the bounded simulation settings this run used, as JSON.
+  settings String
+
+  totalRecords    Int
+  partitionCount  Int
+  eligibleRecords Int
+
+  processed          Int @default(0)
+  applied            Int @default(0)
+  noopAlreadyCurrent Int @default(0)
+  conflicts          Int @default(0)
+  reevaluated        Int @default(0)
+  protectedUpdates   Int @default(0)
+  staleBlocked       Int @default(0)
+  failed             Int @default(0)
+
+  currentPartition   Int @default(0)
+  currentRecordIndex Int @default(0)
+
+  startedAt     DateTime  @default(now())
+  crashedAt     DateTime?
+  recoveredAt   DateTime?
+  completedAt   DateTime?
+  failureReason String?
+
+  checkpoints     Checkpoint[]
+  pendingResults  PendingResult[]
+  considerations  ConsiderationLedger[]
+  writes          WriteLedger[]
+  conflictRecords Conflict[]
+
+  @@index([status])
+}
+
+/// A resume point.
+///
+/// `recordPosition` always refers to the last *flushed* record, never one still in the in-flight
+/// batch: a checkpoint that advertised unflushed progress would cause a resume to skip records and
+/// silently break coverage.
+model Checkpoint {
+  jobId          String
+  id             Int    @id @default(autoincrement())
+  partitionIndex Int
+  recordPosition Int
+  processedCount Int
+  jobStatus      String
+
+  /// ACTIVE | SUPERSEDED | LOST. Exactly one ACTIVE per job; LOST is never readable as a cursor.
+  status String @default("ACTIVE")
+
+  createdAt DateTime @default(now())
+
+  job BackfillJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, status])
+}
+
+/// A computed-but-unwritten result, staged before flushing.
+///
+/// This is the durable source of staleness. Real backfills at scale are commonly built as a compute
+/// stage that commits results to a staging table and a write stage that drains it; those staged rows
+/// survive a crash precisely because they were committed. On resume, BackfillGuard revalidates each
+/// one against the current version, while the naive engine flushes them blindly.
+model PendingResult {
+  id            Int    @id @default(autoincrement())
+  jobId         String
+  patientId     Int
+  /// Version observed when the source data was read. The evidence used to detect staleness.
+  sourceVersion Int
+  computedScore Int
+  computedLevel String
+
+  /// The clinical fields as they were read, as JSON. Lets the naive engine perform the whole-row
+  /// write-back that reverts newer values, and lets the UI show exactly what went stale.
+  inputSnapshot String
+
+  /// PENDING | REVALIDATED | REJECTED | FLUSHED
+  state String @default("PENDING")
+
+  createdAt DateTime @default(now())
+
+  job     BackfillJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  patient Patient     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, state])
+  @@index([patientId])
+}
+
+/// Proof of coverage: one terminal decision per eligible record per job.
+///
+/// The unique constraint on (jobId, patientId) is what makes recovery naturally idempotent —
+/// revisiting a record upserts its outcome instead of inflating the coverage count.
+model ConsiderationLedger {
+  id      Int    @id @default(autoincrement())
+  jobId   String
+  patientId Int
+
+  /// APPLIED | NO_ACTION_ALREADY_CURRENT | REEVALUATED_APPLIED | SKIPPED_NOT_ELIGIBLE | FAILED
+  outcome String
+
+  sourceVersion  Int
+  appliedVersion Int?
+  attempts       Int  @default(1)
+
+  /// INITIAL | RECOVERY — which phase reached this decision.
+  phase  String
+  reason String?
+
+  decidedAt DateTime @default(now())
+
+  job     BackfillJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  patient Patient     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, patientId])
+  @@index([jobId, outcome])
+}
+
+/// Proof of safety: every write attempt, guarded or not.
+///
+/// An applied write where `guardVersion != rowVersionAtWrite` is, by definition, a stale overwrite.
+/// Recording both values for every attempt is what lets the verifier detect one independently
+/// instead of taking the engine's word for it.
+model WriteLedger {
+  id        Int    @id @default(autoincrement())
+  jobId     String
+  patientId Int
+
+  /// Version the write was predicated on.
+  guardVersion Int
+  /// Version actually present on the row, read inside the same transaction as the write.
+  rowVersionAtWrite Int
+
+  applied Boolean
+  /// False for the naive engine, which writes without a version predicate.
+  guarded Boolean @default(true)
+  /// True when the write also overwrote clinical source fields (naive whole-row write-back).
+  wroteSourceFields Boolean @default(false)
+
+  scoreWritten       Int?
+  resultingLastBfVer Int?
+
+  phase String
+
+  createdAt DateTime @default(now())
+
+  job     BackfillJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  patient Patient     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, patientId])
+  @@index([jobId, applied])
+}
+
+/// A detected version conflict and its resolution.
+model Conflict {
+  id        Int    @id @default(autoincrement())
+  jobId     String
+  patientId Int
+
+  sourceVersion  Int
+  currentVersion Int
+
+  /// The score computed from stale data and refused.
+  oldScore Int
+  /// The score computed after re-reading. Null until re-evaluation completes.
+  newScore Int?
+
+  /// JSON [{ field, from, to }] — which inputs moved between the read and the write.
+  changedFields String
+
+  /// PENDING | REEVALUATED | FAILED
+  resolution String @default("PENDING")
+
+  detectedAt DateTime  @default(now())
+  resolvedAt DateTime?
+
+  job     BackfillJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  patient Patient     @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, resolution])
+  @@index([patientId])
+}
+
+/// A clinical update from a doctor, nurse or laboratory.
+///
+/// Verification replays these per field to confirm no online write was later clobbered by an older
+/// value, so `changedFields` must record both the previous and the new value.
+model OnlineUpdate {
+  id        Int    @id @default(autoincrement())
+  patientId Int
+
+  /// DOCTOR | NURSE | LAB
+  actorType String
+
+  /// JSON [{ field, from, to }]
+  changedFields String
+
+  previousVersion Int
+  newVersion      Int
+
+  /// MANUAL | AUTO | SCRIPTED
+  source String
+
+  createdAt DateTime @default(now())
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([patientId, newVersion])
+  @@index([createdAt])
+}
+
+/// The event stream backing the live timeline.
+///
+/// `sequence` is monotonic and gap-free across a run, which lets the client detect dropped events
+/// and lets tests assert ordering without depending on timestamps.
+model EventLog {
+  id       Int    @id @default(autoincrement())
+  sequence Int    @unique
+  jobId    String?
+
+  type     String
+  severity String
+  message  String
+
+  patientCode    String?
+  partitionIndex Int?
+
+  /// Type-specific structured detail, as JSON.
+  payload String?
+
+  createdAt DateTime @default(now())
+
+  @@index([sequence])
+  @@index([type])
+}

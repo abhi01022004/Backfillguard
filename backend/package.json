@@ -9,10 +9,19 @@
     "start": "tsx src/index.ts",
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "postinstall": "tsx scripts/prisma.ts generate",
+    "prisma": "tsx scripts/prisma.ts",
+    "db:generate": "tsx scripts/prisma.ts generate",
+    "db:migrate": "tsx scripts/prisma.ts migrate dev",
+    "db:push": "tsx scripts/prisma.ts db push",
+    "db:studio": "tsx scripts/prisma.ts studio",
+    "db:seed": "tsx src/infra/seed/seedCli.ts",
+    "db:reset": "tsx src/infra/seed/seedCli.ts --reset"
   },
   "dependencies": {
     "@bg/shared": "1.0.0",
+    "@prisma/client": "6.19.3",
     "cors": "2.8.5",
     "express": "5.2.1",
     "zod": "4.5.4"
@@ -21,6 +30,7 @@
     "@types/cors": "2.8.19",
     "@types/express": "5.0.6",
     "@types/node": "26.4.1",
+    "prisma": "6.19.3",
     "tsx": "4.23.13",
     "typescript": "7.0.2",
     "vitest": "5.0.0"

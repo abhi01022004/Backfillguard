@@ -36,7 +36,7 @@ task.
 | Phase | Scope | State |
 |---|---|---|
 | A | Foundation: workspaces, shared contract, API skeleton, logging, errors | Done |
-| B | Database, synthetic dataset, risk calculator | Next |
+| B | Database, synthetic dataset, repository adapters | Done (risk calculator next) |
 | C | Backfill engine, version control, checkpoints, crash, recovery, conflicts, verification | Planned |
 | D | Real-time event stream and dashboard | Planned |
 | E | One-click demo, naive comparison, verification report | Planned |
@@ -56,14 +56,17 @@ This README is expanded into the full document required by R25.1 in task 25.
 Requires Node.js 22.12 or newer.
 
 ```bash
-npm install
+npm install                       # also generates the Prisma client
+npm run db:migrate                # create the SQLite schema
+npm run db:seed                   # generate 1,000 synthetic patients
 npm run dev
 ```
 
 - Frontend: http://localhost:5173
 - Backend:  http://localhost:4000/api/health
 
-The header shows a **Backend connected** badge when the frontend has reached the API.
+The header shows a **Backend connected** badge when the frontend has reached the API, and
+`/api/health` reports the patient count once seeded.
 
 ### Other commands
 
@@ -75,9 +78,16 @@ The header shows a **Backend connected** badge when the frontend has reached the
 | `npm test` | Full test suite, non-watch |
 | `npm run typecheck` | Typecheck every workspace |
 | `npm run build` | Typecheck backend, build frontend bundle |
+| `npm run db:migrate` | Apply the schema |
+| `npm run db:seed` | Regenerate the synthetic dataset |
+| `npm run db:reset` | Clear job state and unscore patients, keeping the same dataset |
 
-No `.env` file is needed. See [`.env.example`](.env.example) for the tunable settings and their
-bounds.
+No `.env` file is needed: the database path is resolved to an absolute location in code, so the
+Prisma CLI and the running app can never disagree about which file they are using. See
+[`.env.example`](.env.example) for the tunable settings and their bounds.
+
+`db:seed` regenerates patients from a seed; `db:reset` keeps the dataset but returns every record to
+an unscored baseline, which is what makes the demo replayable against identical starting data.
 
 ---
 
