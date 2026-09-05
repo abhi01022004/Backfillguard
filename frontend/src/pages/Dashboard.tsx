@@ -37,7 +37,7 @@ export function Dashboard() {
   const { report, loaded: reportLoaded } = useVerificationReport(events);
   const conflicts = useConflicts(events);
   const checkpoint = useCheckpoint(events);
-  const { scenario } = useScenario(events);
+  const { scenario, error: scenarioError } = useScenario(events);
   const controls = useSimulationControls();
 
   /**
@@ -59,6 +59,7 @@ export function Dashboard() {
         scenario={scenario}
         controls={controls}
         patientCount={job?.metrics?.eligibleRecords ?? null}
+        scenarioError={scenarioError}
       />
 
       <KpiGrid job={job} report={report} reportLoaded={reportLoaded} />
@@ -67,6 +68,7 @@ export function Dashboard() {
         <ControlPanel
           job={job}
           hasCheckpoint={checkpoint.hasCheckpoint}
+          checkpointError={checkpoint.error}
           controls={controls}
           settings={runSettings}
         />

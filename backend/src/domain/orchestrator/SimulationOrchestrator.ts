@@ -556,17 +556,66 @@ export class SimulationOrchestrator {
   private async runLoop(): Promise<void> {
     const delayMs = Math.max(0, Math.round(1000 / Math.max(1, this.settings.backfillSpeed)));
 
-    while (isActivelyProcessing(this.status)) {
-      const hasMore = await this.tickOnce();
+    try {
+      while (isActivelyProcessing(this.status)) {
+        const hasMore = await this.tickOnce();
 
-      if (!hasMore) {
-        await this.complete();
-        return;
+        if (!hasMore) {
+          await this.complete();
+          return;
+        }
+
+        // Pacing only. Delay affects wall-clock duration, never ordering or results.
+        await this.deps.clock.sleep(delayMs);
       }
-
-      // Pacing only. Delay affects wall-clock duration, never ordering or results.
-      await this.deps.clock.sleep(delayMs);
+    } catch (error) {
+      /**
+       * Anything the per-record handler did not already catch (R23.4).
+       *
+       * Nobody awaits this loop except `awaitLoopStop`, so without this the rejection would surface only as an
+       * unhandled promise rejection in the process log — while the job sat at RUNNING forever, with the
+       * dashboard showing a progress bar that had silently stopped moving. A failure that is invisible on the
+       * surface it is meant to be observed from is worse than a loud one.
+       *
+       * The record-level failure path in `BackfillEngine` still handles per-record errors and keeps their
+       * terminal ledger entries. This is the outer net for everything else: a checkpoint write failing, a
+       * participant throwing, a repository going away mid-run.
+       */
+      await this.failJob(error);
     }
+  }
+
+  /**
+   * Moves the job to FAILED and reports the reason on the event stream.
+   *
+   * Deliberately tolerant of a second failure while failing: if the transition or the persist also throws,
+   * there is nothing further to escalate to and re-throwing here would replace a described failure with an
+   * anonymous one.
+   */
+  private async failJob(error: unknown): Promise<void> {
+    const reason = error instanceof Error ? error.message : String(error);
+    this.failureReason = reason;
+
+    try {
+      await this.setStatus(transition(JOB_ACTION.FAIL, this.status), { failureReason: reason });
+    } catch {
+      // Already in a state FAIL is not permitted from; the event below still reports what happened.
+      this.status = JOB_STATUS.FAILED;
+    }
+
+    this.deps.events.emit({
+      type: EVENT_TYPE.RECORD_FAILED,
+      severity: EVENT_SEVERITY.CRITICAL,
+      jobId: this.jobId,
+      message: `Backfill failed: ${reason}`,
+      payload: {
+        reason,
+        stack: error instanceof Error ? error.stack : undefined,
+        position: this.engine?.position ?? {},
+      },
+    });
+
+    await this.deps.events.flush().catch(() => undefined);
   }
 
   private async awaitLoopStop(): Promise<void> {
@@ -1033,6 +1082,17 @@ export class SimulationOrchestrator {
       // awaiting one would hang rather than run fast.
       if (delayMs > 0) await this.deps.clock.sleep(delayMs);
     }
+  }
+
+  /**
+   * Exposed so the scenario runner can report a mid-run failure the same way the paced loop does.
+   *
+   * External drivers propagate errors to their caller, which is right — but the job must still land in a valid
+   * state and the failure must still reach the event stream, or the dashboard would show a run frozen with no
+   * explanation (R23.4).
+   */
+  async reportFailure(error: unknown): Promise<void> {
+    await this.failJob(error);
   }
 
   /** Exposed for the engine-level assertions in tests and for recovery to hand over position. */

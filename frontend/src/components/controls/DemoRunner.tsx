@@ -93,9 +93,16 @@ export interface DemoRunnerProps {
   controls: ControlsState;
   /** Whether a dataset exists to run against. */
   patientCount: number | null;
+  /** Set when the step tracker could not be read, so a stale tracker is not mistaken for a stalled demo. */
+  scenarioError?: string | null;
 }
 
-export function DemoRunner({ scenario, controls, patientCount }: DemoRunnerProps) {
+export function DemoRunner({
+  scenario,
+  controls,
+  patientCount,
+  scenarioError = null,
+}: DemoRunnerProps) {
   const running = scenario?.running ?? false;
   const finished = !running && scenario?.completedAt !== null && scenario?.completedAt !== undefined;
 
@@ -162,6 +169,25 @@ export function DemoRunner({ scenario, controls, patientCount }: DemoRunnerProps
           {noDataReason ? <p className="max-w-[14rem] text-[11px] text-rose-700">{noDataReason}</p> : null}
         </div>
       </div>
+
+      {/**
+       * A failed step-tracker read is worth saying out loud.
+       *
+       * Otherwise the tracker simply stops updating, which is indistinguishable from a demo that has stalled —
+       * and someone watching would reasonably conclude the run itself was stuck.
+       */}
+      {scenarioError ? (
+        <p role="alert" className="mt-3 text-xs text-rose-800">
+          Step progress could not be read: {scenarioError} The demo may still be running; the tracker below is
+          not current.
+        </p>
+      ) : null}
+
+      {controls.error?.action === 'runDemo' || controls.error?.action === 'abortDemo' ? (
+        <p role="alert" className="mt-3 text-xs text-rose-800">
+          {controls.error.message}
+        </p>
+      ) : null}
 
       {scenario && scenario.steps.length > 0 ? (
         <div className="mt-4 border-t border-brand-200/70 pt-4">

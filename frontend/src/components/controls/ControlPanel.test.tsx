@@ -126,6 +126,27 @@ describe('ControlPanel enablement', () => {
     );
   });
 
+  it('distinguishes "no checkpoint" from "could not read checkpoint state"', () => {
+    /**
+     * Collapsing the two would make the control claim "no checkpoint exists yet" when the truth is that nobody
+     * knows — a confident statement about something never established, and the operator would then reasonably
+     * conclude the backfill had not checkpointed.
+     */
+    render(
+      <ControlPanel
+        job={makeJob({ status: JOB_STATUS.RUNNING })}
+        hasCheckpoint={false}
+        checkpointError="Cannot reach the BackfillGuard backend."
+        controls={makeControls()}
+      />,
+    );
+
+    const button = screen.getByRole('button', { name: /^Destroy checkpoint —/ });
+    expect(button).toBeDisabled();
+    expect(button.getAttribute('title')).toContain('could not be read');
+    expect(button.getAttribute('title')).not.toContain('No checkpoint exists yet');
+  });
+
   it('refuses to offer checkpoint destruction when there is nothing to destroy', () => {
     /**
      * A destructive action that reports success having done nothing is worse than a disabled one: the demo
@@ -428,6 +449,35 @@ describe('DemoRunner', () => {
     const live = screen.getByRole('status');
     expect(live).toHaveAttribute('aria-live', 'polite');
     expect(live).toHaveTextContent('Step 2 of 3');
+  });
+
+  it('says when the step tracker is not current, rather than looking stalled', () => {
+    // A tracker that silently stops updating is indistinguishable from a demo that has stopped.
+    render(
+      <DemoRunner
+        scenario={SCENARIO}
+        controls={makeControls()}
+        patientCount={1000}
+        scenarioError="Cannot reach the BackfillGuard backend."
+      />,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Step progress could not be read');
+    expect(screen.getByRole('alert')).toHaveTextContent('the tracker below is not current');
+  });
+
+  it('surfaces a failed demo start next to the button', () => {
+    render(
+      <DemoRunner
+        scenario={null}
+        controls={makeControls({
+          error: { action: 'runDemo', message: 'The dataset is empty — seed it before running the demo.' },
+        })}
+        patientCount={1000}
+      />,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent('seed it before running the demo');
   });
 
   it('starts the demo on click', async () => {

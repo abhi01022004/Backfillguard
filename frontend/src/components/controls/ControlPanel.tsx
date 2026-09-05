@@ -48,12 +48,26 @@ export interface ControlPanelProps {
   job: BackfillJobState | null;
   /** Whether a checkpoint currently exists for the job. */
   hasCheckpoint: boolean;
+  /**
+   * Set when checkpoint state could not be read.
+   *
+   * Kept distinct from `hasCheckpoint: false`, which is a *measurement*. Collapsing the two would make the
+   * control claim "no checkpoint exists yet" when the truth is "nobody knows" — a confident statement about
+   * something that was never established.
+   */
+  checkpointError?: string | null;
   controls: ControlsState;
   /** Run settings to start with, from the settings form. */
   settings?: Partial<SimulationSettings>;
 }
 
-export function ControlPanel({ job, hasCheckpoint, controls, settings = {} }: ControlPanelProps) {
+export function ControlPanel({
+  job,
+  hasCheckpoint,
+  checkpointError = null,
+  controls,
+  settings = {},
+}: ControlPanelProps) {
   const status = job?.status ?? null;
   const busy = (action: string) => controls.pending === action;
 
@@ -62,8 +76,9 @@ export function ControlPanel({ job, hasCheckpoint, controls, settings = {} }: Co
   const reason = (action: string, ruleReason: string | null): string | null =>
     ruleReason ?? (otherBusy(action) ? 'another control is still running' : null);
 
-  const checkpointReason =
-    status === null || status === JOB_STATUS.IDLE
+  const checkpointReason = checkpointError
+    ? `Checkpoint state could not be read, so this control is unavailable: ${checkpointError}`
+    : status === null || status === JOB_STATUS.IDLE
       ? 'No job is running, so there is no checkpoint to destroy.'
       : !hasCheckpoint
         ? 'No checkpoint exists yet. Let the backfill process enough records for one to be created.'

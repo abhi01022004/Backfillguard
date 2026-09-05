@@ -24,6 +24,14 @@ export interface LiveServerDeps {
   getJobState: () => Promise<BackfillJobState | null>;
 }
 
+/**
+ * Minimum gap between snapshots served to one socket.
+ *
+ * Matched to the progress-frame interval: a client already receives coalesced state at that rate, so serving
+ * on-demand snapshots any faster could not tell it anything new.
+ */
+const RESYNC_MIN_INTERVAL_MS = TRANSPORT.progressFrameIntervalMs;
+
 export function createLiveServer({ httpServer, events, getJobState }: LiveServerDeps): SocketServer {
   const io = new SocketServer(httpServer, {
     path: LIVE_PATH,
@@ -60,15 +68,38 @@ export function createLiveServer({ httpServer, events, getJobState }: LiveServer
       }
     })();
 
-    // Lets a client that suspects it missed something ask for a fresh snapshot without reconnecting.
+    /**
+     * Lets a client that suspects it missed something ask for a fresh snapshot without reconnecting.
+     *
+     * Throttled per socket, because building a snapshot is not cheap: `getJobState()` re-reads the whole
+     * consideration ledger to derive coverage. A client emitting `resync` in a loop — a bug in a reconnect
+     * handler is the likely cause, not malice — would put the server into a read storm during a live run.
+     * One snapshot per interval is plenty: the point of a resync is to become current, and a request that
+     * arrives 50ms after the last one already is.
+     */
+    let lastResyncAt = 0;
+
     socket.on('resync', () => {
+      const now = Date.now();
+      if (now - lastResyncAt < RESYNC_MIN_INTERVAL_MS) return;
+      lastResyncAt = now;
+
       void (async () => {
-        const job = await getJobState();
-        socket.emit(LIVE_CHANNEL.snapshot, {
-          job,
-          recentEvents: events.recent(TRANSPORT.timelineWindow),
-          latestSequence: events.latestSequence(),
-        } satisfies LiveSnapshot);
+        try {
+          const job = await getJobState();
+          socket.emit(LIVE_CHANNEL.snapshot, {
+            job,
+            recentEvents: events.recent(TRANSPORT.timelineWindow),
+            latestSequence: events.latestSequence(),
+          } satisfies LiveSnapshot);
+        } catch (error) {
+          // Logged rather than swallowed (R23.3). An unhandled rejection here would be attributed to the
+          // process rather than to the socket that caused it.
+          logger.error('failed to serve resync', {
+            socketId: socket.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
       })();
     });
 
