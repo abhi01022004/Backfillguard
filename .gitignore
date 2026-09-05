@@ -1,0 +1,30 @@
+node_modules/
+dist/
+build/
+coverage/
+
+# Local environment overrides. .env.example is committed; real .env files are not.
+.env
+.env.local
+*.env
+!.env.example
+
+# SQLite database and its WAL sidecars. The dataset is fully regenerable from a seed, so none of it
+# is committed — but the directory itself is kept so a fresh clone has somewhere to write it.
+backend/data/*
+!backend/data/.gitkeep
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Logs
+*.log
+npm-debug.log*

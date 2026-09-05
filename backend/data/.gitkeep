@@ -1,0 +1,2 @@
+# SQLite database files are written here at runtime. Contents are gitignored; the directory is kept
+# so a fresh clone has somewhere to put the database without a mkdir step.

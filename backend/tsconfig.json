@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    // TypeScript 7 removed `baseUrl`; path mappings now resolve relative to this file's directory.
+    "paths": {
+      "@bg/shared": ["../shared/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "tests/**/*.ts", "../shared/src/**/*.ts"]
+}

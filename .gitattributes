@@ -1,0 +1,16 @@
+# Normalise line endings so the repository content is identical regardless of the OS a contributor
+# works on. Without this, Windows checkouts commit CRLF and diffs become noise.
+* text=auto eol=lf
+
+# Binary assets git should never try to normalise or diff as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.pdf binary
+*.db binary
+
+# Generated: collapse in diffs and exclude from language statistics.
+package-lock.json linguist-generated=true -diff

@@ -1,0 +1,18 @@
+{
+  "name": "@bg/shared",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared types, enums and simulation bounds for BackfillGuard. Consumed from source via tsconfig paths (backend) and a Vite alias (frontend), so there is no build step and no dist/src ambiguity.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
+}
