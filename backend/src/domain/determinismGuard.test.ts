@@ -54,6 +54,35 @@ function stripComments(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 }
 
+/**
+ * Collects test files across the whole backend, for the sleep-free guarantee below.
+ *
+ * `BACKEND_SRC` rather than `DOMAIN_DIR`: the rule applies to every suite, including the API tests, not only
+ * to the ones that exercise the engines.
+ */
+const BACKEND_SRC = join(DOMAIN_DIR, '..');
+
+function collectTestFiles(dir: string): string[] {
+  const found: string[] = [];
+
+  for (const entry of readdirSync(dir)) {
+    const fullPath = join(dir, entry);
+
+    if (statSync(fullPath).isDirectory()) {
+      found.push(...collectTestFiles(fullPath));
+      continue;
+    }
+
+    if (!entry.endsWith('.test.ts')) continue;
+    // This file names the banned patterns in order to search for them.
+    if (entry === 'determinismGuard.test.ts') continue;
+
+    found.push(fullPath);
+  }
+
+  return found;
+}
+
 describe('determinism guard', () => {
   const files = collectSourceFiles(DOMAIN_DIR);
 
@@ -76,6 +105,65 @@ describe('determinism guard', () => {
       violations,
       `${label} found in domain code: ${violations.join(', ')}. ` +
         `Domain logic must stay deterministic — ${use}.`,
+    ).toEqual([]);
+  });
+});
+
+/**
+ * The suite must never synchronise by waiting (R21.7).
+ *
+ * A test that sleeps to "let things settle" is the worst kind of test: it passes on a fast machine, fails
+ * intermittently on a slow one, and its failure says nothing about what is wrong. It is also unnecessary here —
+ * the simulation advances only when something calls `tickOnce()`, so a test can drive it to any exact point and
+ * assert synchronously.
+ *
+ * The one legitimate use of real time is *pacing*: the API suite drives the production paced loop through HTTP,
+ * which needs a real clock. That is a property of the code under test rather than a synchronisation device, and
+ * it is expressed by injecting a clock, not by sleeping in the test body — so this guard does not collide with
+ * it.
+ */
+describe('test hygiene guard', () => {
+  const testFiles = collectTestFiles(BACKEND_SRC);
+
+  const BANNED_IN_TESTS: { pattern: RegExp; label: string; instead: string }[] = [
+    {
+      pattern: /\bsetTimeout\s*\(/,
+      label: 'setTimeout()',
+      instead: 'drive the simulation with tickOnce() or runToCompletion()',
+    },
+    {
+      pattern: /\bsetInterval\s*\(/,
+      label: 'setInterval()',
+      instead: 'drive the simulation with tickOnce()',
+    },
+    {
+      pattern: /await\s+new\s+Promise\s*\(/,
+      label: 'await new Promise(...) — the sleep idiom',
+      instead: 'await the operation itself, or drive the tick loop to the point you need',
+    },
+    {
+      pattern: /\bvi\s*\.\s*advanceTimersBy/,
+      label: 'fake timer advancement',
+      instead: 'use the injected Clock port, which needs no timer mocking',
+    },
+  ];
+
+  it('finds test files to check', () => {
+    expect(testFiles.length).toBeGreaterThan(0);
+  });
+
+  it.each(BANNED_IN_TESTS)('contains no $label', ({ pattern, label, instead }) => {
+    const violations: string[] = [];
+
+    for (const file of testFiles) {
+      const source = stripComments(readFileSync(file, 'utf8'));
+      if (pattern.test(source)) violations.push(relative(BACKEND_SRC, file));
+    }
+
+    expect(
+      violations,
+      `${label} found in: ${violations.join(', ')}. ` +
+        `The suite must not synchronise by waiting — ${instead}.`,
     ).toEqual([]);
   });
 });

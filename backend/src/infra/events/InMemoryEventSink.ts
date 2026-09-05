@@ -61,6 +61,21 @@ export class InMemoryEventSink implements EventSink {
     return this.sequence;
   }
 
+  /**
+   * Events after a given sequence number.
+   *
+   * Async to match the durable sink's signature, so this class satisfies the API's `EventLogReader` and the
+   * event endpoints can be exercised without a database. Served from the ring buffer, which for this adapter
+   * *is* the log — so unlike the persisting sink it can genuinely have lost old events, and callers relying on
+   * completeness should use the durable one.
+   */
+  async since(sequence: number, limit: number = TRANSPORT.timelineWindow): Promise<SimulationEvent[]> {
+    return this.buffer.filter((event) => event.sequence > sequence).slice(0, limit);
+  }
+
+  /** Always zero: nothing is queued for a write that could fail. */
+  readonly droppedCount = 0;
+
   async flush(): Promise<void> {
     // Nothing buffered beyond memory; the persisting sink overrides this.
   }

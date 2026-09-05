@@ -13,9 +13,8 @@ import { createOnlineUpdateRouter } from './api/routes/onlineUpdate';
 import { createCheckpointRouter } from './api/routes/checkpoint';
 import { createVerifyRouter } from './api/routes/verify';
 import { createCompareRouter } from './api/routes/compare';
-import { createEventRouter } from './api/routes/events';
+import { createEventRouter, type EventLogReader } from './api/routes/events';
 import { createScenarioRouter } from './api/routes/scenario';
-import type { BufferedDbEventSink } from './infra/events/BufferedDbEventSink';
 import type { Clock } from './lib/clock';
 import type { OnlineUpdateSimulator } from './domain/online/OnlineUpdateSimulator';
 import type { ScenarioManager } from './domain/scenario/ScenarioManager';
@@ -26,7 +25,7 @@ export interface AppDeps {
   onlineUpdates: OnlineUpdateSimulator;
   scenarios: ScenarioManager;
   clock: Clock;
-  events: BufferedDbEventSink;
+  events: EventLogReader;
   health?: HealthDeps;
 }
 

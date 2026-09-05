@@ -1,11 +1,27 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { TRANSPORT } from '@bg/shared';
-import type { BufferedDbEventSink } from '../../infra/events/BufferedDbEventSink';
+import { TRANSPORT, type SimulationEvent } from '@bg/shared';
 import { validate } from '../middleware/validate';
 
+/**
+ * The reading surface this router actually uses.
+ *
+ * Declared structurally rather than as `BufferedDbEventSink`, so the API can be exercised over in-memory
+ * infrastructure with no database at all. Naming the concrete class here would have forced every API test to
+ * stand up Prisma just to read an event count.
+ */
+export interface EventLogReader {
+  /** Durable log, for filling a detected gap. */
+  since(sequence: number, limit?: number): Promise<SimulationEvent[]>;
+  /** The bounded in-memory window backing the live timeline. */
+  recent(limit?: number): SimulationEvent[];
+  latestSequence(): number;
+  /** Non-zero means the durable log is incomplete. */
+  readonly droppedCount: number;
+}
+
 export interface EventRoutesDeps {
-  events: BufferedDbEventSink;
+  events: EventLogReader;
 }
 
 const eventQuerySchema = z.strictObject({

@@ -345,7 +345,7 @@ describe('BackfillEngine (contended)', () => {
     expect(glucoseChange.to).toBe(260);
   });
 
-  it('marks the record REEVERALUATED_APPLIED in the coverage ledger', async () => {
+  it('marks the record REEVALUATED_APPLIED in the coverage ledger', async () => {
     const harness = await makeHarness({ batchSize: 10 });
 
     harness.orchestrator.register(
