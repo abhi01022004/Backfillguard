@@ -38,7 +38,8 @@ task.
 | A | Foundation: workspaces, shared contract, API skeleton, logging, errors | Done |
 | B | Database, synthetic dataset, repository adapters, risk calculator | Done |
 | C | Backfill engine, version control, conflict re-evaluation | Done |
-| C | Checkpoints, crash, recovery, verification, naive comparison | Next |
+| C | Checkpoints, crash injection, evidence-based recovery | Done |
+| C | Verification engine, naive comparison | Next |
 | D | Real-time event stream and dashboard | Planned |
 | E | One-click demo, naive comparison, verification report | Planned |
 | F | Test suite, security audit, polish, documentation | Planned |

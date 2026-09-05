@@ -127,7 +127,7 @@ describe('BackfillEngine (uncontended)', () => {
   });
 
   it('scores every record and reaches full coverage', async () => {
-    await harness.orchestrator.start();
+    await harness.orchestrator.start({}, { autoAdvance: false });
     await harness.orchestrator.runToCompletion();
 
     expect(harness.orchestrator.getStatus()).toBe(JOB_STATUS.COMPLETED);
@@ -142,7 +142,7 @@ describe('BackfillEngine (uncontended)', () => {
   });
 
   it('gives every eligible record exactly one terminal ledger entry', async () => {
-    await harness.orchestrator.start();
+    await harness.orchestrator.start({}, { autoAdvance: false });
     await harness.orchestrator.runToCompletion();
 
     const ids = await harness.patients.allIds();
@@ -156,7 +156,7 @@ describe('BackfillEngine (uncontended)', () => {
   it('stores a score that matches a fresh recomputation for every record', async () => {
     // The invariant verification later relies on: stored score == recompute(current data), and
     // lastBackfillVersion == version.
-    await harness.orchestrator.start();
+    await harness.orchestrator.start({}, { autoAdvance: false });
     await harness.orchestrator.runToCompletion();
 
     const all = (await harness.patients.findPage({ page: 1, pageSize: 500 })).items;
@@ -173,7 +173,7 @@ describe('BackfillEngine (uncontended)', () => {
   it('never touches a clinical field or the version', async () => {
     const before = (await harness.patients.findPage({ page: 1, pageSize: 500 })).items;
 
-    await harness.orchestrator.start();
+    await harness.orchestrator.start({}, { autoAdvance: false });
     await harness.orchestrator.runToCompletion();
 
     const after = (await harness.patients.findPage({ page: 1, pageSize: 500 })).items;
@@ -192,7 +192,7 @@ describe('BackfillEngine (uncontended)', () => {
   });
 
   it('records one applied, guarded write per record with matching versions', async () => {
-    await harness.orchestrator.start();
+    await harness.orchestrator.start({}, { autoAdvance: false });
     await harness.orchestrator.runToCompletion();
 
     const ledger = await harness.patients.listWriteLedger('BG-DEMO-001');
@@ -208,7 +208,7 @@ describe('BackfillEngine (uncontended)', () => {
   });
 
   it('reports all partitions complete', async () => {
-    await harness.orchestrator.start();
+    await harness.orchestrator.start({}, { autoAdvance: false });
     await harness.orchestrator.runToCompletion();
 
     const { partitions } = await harness.orchestrator.getState();
@@ -223,7 +223,7 @@ describe('BackfillEngine (uncontended)', () => {
   });
 
   it('emits the expected lifecycle events', async () => {
-    await harness.orchestrator.start();
+    await harness.orchestrator.start({}, { autoAdvance: false });
     await harness.orchestrator.runToCompletion();
 
     expect(harness.events.countOfType(EVENT_TYPE.BACKFILL_STARTED)).toBe(1);
@@ -233,7 +233,7 @@ describe('BackfillEngine (uncontended)', () => {
   });
 
   it('assigns strictly increasing, gap-free sequence numbers', async () => {
-    await harness.orchestrator.start();
+    await harness.orchestrator.start({}, { autoAdvance: false });
     await harness.orchestrator.runToCompletion();
 
     const sequences = harness.events.all().map((event) => event.sequence);
@@ -258,7 +258,7 @@ describe('BackfillEngine (contended)', () => {
       }),
     );
 
-    await harness.orchestrator.start();
+    await harness.orchestrator.start({}, { autoAdvance: false });
     await harness.orchestrator.runToCompletion();
 
     const metrics = (await harness.orchestrator.getState()).metrics;
@@ -290,7 +290,7 @@ describe('BackfillEngine (contended)', () => {
       }),
     );
 
-    await harness.orchestrator.start();
+    await harness.orchestrator.start({}, { autoAdvance: false });
     await harness.orchestrator.runToCompletion();
 
     const target = (await harness.patients.findByCode('P0003'))!;
@@ -327,7 +327,7 @@ describe('BackfillEngine (contended)', () => {
       }),
     );
 
-    await harness.orchestrator.start();
+    await harness.orchestrator.start({}, { autoAdvance: false });
     await harness.orchestrator.runToCompletion();
 
     const conflicts = await harness.patients.listConflicts('BG-DEMO-001');
@@ -354,7 +354,7 @@ describe('BackfillEngine (contended)', () => {
       }),
     );
 
-    await harness.orchestrator.start();
+    await harness.orchestrator.start({}, { autoAdvance: false });
     await harness.orchestrator.runToCompletion();
 
     const target = (await harness.patients.findByCode('P0003'))!;
@@ -375,7 +375,7 @@ describe('BackfillEngine (contended)', () => {
       }),
     );
 
-    await harness.orchestrator.start();
+    await harness.orchestrator.start({}, { autoAdvance: false });
     await harness.orchestrator.runToCompletion();
 
     const relevant = harness.events
@@ -422,7 +422,7 @@ describe('BackfillEngine (contended)', () => {
       ),
     );
 
-    await harness.orchestrator.start();
+    await harness.orchestrator.start({}, { autoAdvance: false });
     await harness.orchestrator.runToCompletion();
 
     const metrics = (await harness.orchestrator.getState()).metrics;
@@ -456,7 +456,7 @@ describe('BackfillEngine determinism', () => {
         }),
       );
 
-      await harness.orchestrator.start();
+      await harness.orchestrator.start({}, { autoAdvance: false });
       await harness.orchestrator.runToCompletion();
 
       const patients = (await harness.patients.findPage({ page: 1, pageSize: 500 })).items;

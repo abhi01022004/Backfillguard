@@ -97,9 +97,50 @@ export function createBackfillRouter({ orchestrator, repository }: BackfillRoute
     }
   });
 
+  /**
+   * Injects a crash (R8.1, R8.3).
+   *
+   * Not an error condition from the API's point of view: crashing is a deliberate demo action, so it
+   * returns the resulting state rather than a failure. What matters is that the response shows a
+   * non-zero `pendingResultCount` — proof that computed-but-unwritten results survived, which is what
+   * recovery then has to reason about.
+   */
+  router.post('/crash', async (_req, res, next) => {
+    try {
+      await orchestrator.crash();
+      res.json(await orchestrator.getState());
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  /**
+   * Resumes after a crash using data evidence (R9.6).
+   *
+   * Returns the recovery summary alongside the job state, because the summary is the evidence for the
+   * central claim: it separates records left untouched from records reprocessed, which is how you can
+   * tell recovery reasoned about the data rather than blindly rewriting it.
+   */
+  router.post('/recover', async (_req, res, next) => {
+    try {
+      const summary = await orchestrator.recover();
+      res.json({ recovery: summary, state: await orchestrator.getState() });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get('/state', async (_req, res, next) => {
     try {
       res.json(await orchestrator.getState());
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get('/recovery', async (_req, res, next) => {
+    try {
+      res.json({ recovery: orchestrator.getLastRecoverySummary() });
     } catch (error) {
       next(error);
     }

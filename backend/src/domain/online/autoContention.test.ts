@@ -69,7 +69,7 @@ async function runWithAutoUpdates(options: {
   simulator.configureAuto(options.updatesPerHundred, options.strategy ?? TARGET_STRATEGY.IN_FLIGHT);
   orchestrator.register(simulator.asTickParticipant());
 
-  await orchestrator.start();
+  await orchestrator.start({}, { autoAdvance: false });
   await orchestrator.runToCompletion();
 
   return { patients, jobs, events, orchestrator, simulator };

@@ -3,18 +3,25 @@ import {
   DEMO_JOB_ID,
   EVENT_SEVERITY,
   EVENT_TYPE,
+  CONSIDERATION_OUTCOME,
   JOB_STATUS,
+  PARTITION_STATE,
   type BackfillJobState,
+  type JobMetrics,
   type JobStatus,
+  type RecoverySummary,
   type SimulationSettings,
 } from '@bg/shared';
 import type { Clock } from '../../lib/clock';
 import type { Rng } from '../../lib/rng';
+import { RecoveryFailedError } from '../../lib/errors';
 import type { EventSink } from '../ports/EventSink';
 import type { JobRepository } from '../ports/JobRepository';
 import type { PatientRepository } from '../ports/PatientRepository';
-import { BackfillEngine } from '../engine/BackfillEngine';
+import { BackfillEngine, type EngineCounters } from '../engine/BackfillEngine';
+import { CheckpointManager } from '../engine/CheckpointManager';
 import { ConflictEngine } from '../engine/ConflictEngine';
+import { RecoveryEngine } from '../engine/RecoveryEngine';
 import {
   JOB_ACTION,
   isActivelyProcessing,
@@ -81,6 +88,17 @@ export interface OrchestratorDeps {
   seed: number;
 }
 
+export interface StartOptions {
+  /**
+   * Whether to begin the paced background loop.
+   *
+   * True (the default) for the running application. False when the caller will drive `tickOnce()`
+   * itself — tests and the headless scenario runner — so there is exactly one thing advancing the
+   * engine at any time.
+   */
+  autoAdvance?: boolean;
+}
+
 export class SimulationOrchestrator {
   private status: JobStatus = JOB_STATUS.IDLE;
   private jobId: string = DEMO_JOB_ID;
@@ -91,8 +109,18 @@ export class SimulationOrchestrator {
   private loop: Promise<void> | null = null;
   private participants: TickParticipant[] = [];
 
-  /** Processed count at which the next checkpoint is due. */
-  private nextCheckpointAt = 0;
+  private checkpoints: CheckpointManager;
+
+  /**
+   * Event counts carried over from phases the current engine no longer holds.
+   *
+   * Only the genuinely additive counters live here. Per-record progress is derived from the ledger in
+   * `buildMetrics`, precisely so it cannot be double counted when recovery revisits a record the first
+   * pass already decided.
+   */
+  private accumulatedEventCounters = { conflicts: 0, protectedUpdates: 0, staleBlocked: 0 };
+
+  private lastRecoverySummary: RecoverySummary | null = null;
 
   private startedAt: string | null = null;
   private completedAt: string | null = null;
@@ -106,6 +134,11 @@ export class SimulationOrchestrator {
       repository: deps.patients,
       events: deps.events,
       maxAttempts: this.settings.maxReevaluationAttempts,
+    });
+    this.checkpoints = new CheckpointManager({
+      jobs: deps.jobs,
+      events: deps.events,
+      interval: this.settings.checkpointInterval,
     });
   }
 
@@ -139,22 +172,7 @@ export class SimulationOrchestrator {
 
   async getState(): Promise<BackfillJobState> {
     const openConflicts = await this.openConflictsByPartition();
-
-    const metrics = this.engine?.getMetrics() ?? {
-      eligibleRecords: 0,
-      processed: 0,
-      applied: 0,
-      noopAlreadyCurrent: 0,
-      conflicts: 0,
-      reevaluated: 0,
-      protectedUpdates: 0,
-      staleWriteAttemptsBlocked: 0,
-      failed: 0,
-      currentPartition: 0,
-      currentRecordIndex: 0,
-      percentComplete: 0,
-    };
-
+    const metrics = await this.buildMetrics();
     const staged = await this.deps.patients.pendingResults(this.jobId, 'PENDING');
 
     return {
@@ -172,6 +190,94 @@ export class SimulationOrchestrator {
       recoveredAt: this.recoveredAt,
       completedAt: this.completedAt,
       failureReason: this.failureReason,
+    };
+  }
+
+  /**
+   * Builds the reported metrics from persisted evidence rather than from in-memory counters.
+   *
+   * ## Why this is not just tidiness
+   *
+   * A run can span two phases — initial processing and recovery — and each phase has its own engine
+   * counters. Naively carrying one phase's counters forward under-reports (recovery only counts the
+   * records it revisited, so partitions completed before the crash vanish), and naively adding them
+   * over-reports (recovery legitimately revisits records the first pass already counted). A live run
+   * showed exactly the first failure: 900 of 1000, while the ledger held all 1000.
+   *
+   * The fix is to stop treating per-record progress as a counter at all. Two different kinds of number
+   * are being conflated:
+   *
+   *  - **Per-record outcomes** (processed, applied, no-op, re-evaluated, failed) are properties of a
+   *    *set of records*. They come from the consideration ledger, which is keyed per record and so is
+   *    immune to double counting no matter how many phases touch a row.
+   *  - **Event counts** (conflicts detected, stale writes blocked, updates protected) are genuinely
+   *    additive occurrences — one record can conflict in more than one phase, and each of those is a
+   *    real event worth reporting. These accumulate across phases.
+   *
+   * This also means the dashboard and the verification report read the same source of truth, so they
+   * cannot disagree.
+   */
+  private async buildMetrics(): Promise<JobMetrics> {
+    const engineMetrics = this.engine?.getMetrics() ?? {
+      eligibleRecords: 0,
+      processed: 0,
+      applied: 0,
+      noopAlreadyCurrent: 0,
+      conflicts: 0,
+      reevaluated: 0,
+      protectedUpdates: 0,
+      staleWriteAttemptsBlocked: 0,
+      failed: 0,
+      currentPartition: 0,
+      currentRecordIndex: 0,
+      percentComplete: 0,
+    };
+
+    if (!this.engine) return engineMetrics;
+
+    const ledger = await this.deps.patients.listConsiderations(this.jobId);
+
+    const outcomes = { applied: 0, noop: 0, reevaluated: 0, failed: 0, skipped: 0 };
+    for (const entry of ledger) {
+      switch (entry.outcome) {
+        case CONSIDERATION_OUTCOME.APPLIED:
+          outcomes.applied += 1;
+          break;
+        case CONSIDERATION_OUTCOME.NO_ACTION_ALREADY_CURRENT:
+          outcomes.noop += 1;
+          break;
+        case CONSIDERATION_OUTCOME.REEVALUATED_APPLIED:
+          outcomes.reevaluated += 1;
+          break;
+        case CONSIDERATION_OUTCOME.FAILED:
+          outcomes.failed += 1;
+          break;
+        default:
+          outcomes.skipped += 1;
+      }
+    }
+
+    const eligible = engineMetrics.eligibleRecords;
+    const processed = ledger.length;
+
+    // Event counters: this phase's, plus anything accumulated by a previous phase.
+    const events = this.accumulatedEventCounters;
+    const engineCounters = this.engine.getCounters();
+
+    return {
+      eligibleRecords: eligible,
+      processed,
+      applied: outcomes.applied,
+      noopAlreadyCurrent: outcomes.noop,
+      reevaluated: outcomes.reevaluated,
+      failed: outcomes.failed,
+      conflicts: events.conflicts + engineCounters.conflicts,
+      protectedUpdates: events.protectedUpdates + engineCounters.protectedUpdates,
+      staleWriteAttemptsBlocked: events.staleBlocked + engineCounters.staleBlocked,
+      currentPartition: engineMetrics.currentPartition,
+      currentRecordIndex: engineMetrics.currentRecordIndex,
+      percentComplete:
+        eligible === 0 ? 0 : Math.min(100, Math.round((processed / eligible) * 1000) / 10),
     };
   }
 
@@ -198,7 +304,10 @@ export class SimulationOrchestrator {
    * fixed for its whole lifetime — changing batch size or partition count mid-run would invalidate the
    * engine's position and any checkpoint taken from it.
    */
-  async start(settingsOverride: Partial<SimulationSettings> = {}): Promise<void> {
+  async start(
+    settingsOverride: Partial<SimulationSettings> = {},
+    options: StartOptions = {},
+  ): Promise<void> {
     const next = transition(JOB_ACTION.START, this.status);
 
     this.settings = { ...this.settings, ...settingsOverride };
@@ -243,10 +352,26 @@ export class SimulationOrchestrator {
     this.crashedAt = null;
     this.recoveredAt = null;
     this.failureReason = null;
-    this.nextCheckpointAt = this.settings.checkpointInterval;
+    this.accumulatedEventCounters = { conflicts: 0, protectedUpdates: 0, staleBlocked: 0 };
+    this.lastRecoverySummary = null;
+
+    this.checkpoints = new CheckpointManager({
+      jobs: this.deps.jobs,
+      events: this.deps.events,
+      interval: this.settings.checkpointInterval,
+    });
 
     await this.setStatus(next);
-    this.startLoop();
+
+    /**
+     * Only the paced loop is optional, never the state transition.
+     *
+     * Tests and the headless scenario runner drive `tickOnce()` themselves, and must not also have a
+     * background loop advancing the same engine — two drivers on one engine would double-step records
+     * and make ordering unpredictable. A manual clock cannot resolve `sleep()` anyway, so a paced loop
+     * would simply hang and then deadlock anything that awaits it.
+     */
+    if (options.autoAdvance ?? true) this.startLoop();
   }
 
   async pause(): Promise<void> {
@@ -368,62 +493,207 @@ export class SimulationOrchestrator {
   }
 
   /**
-   * Creates a checkpoint when enough records have been processed.
+   * Offers a checkpoint after a flush.
    *
-   * Called only from the post-flush path, and the recorded position is the last *flushed* record. A
-   * checkpoint that advertised unflushed progress would cause a resume to skip records that were never
-   * written, silently breaking coverage while appearing to succeed (R7.2a).
+   * Only ever called from the post-flush path, and the position handed over is the last *flushed*
+   * record. The manager asserts that too, so the invariant is enforced at both ends (R7.2a).
    */
   private async maybeCheckpoint(): Promise<void> {
     if (!this.engine) return;
 
     const metrics = this.engine.getMetrics();
-    if (metrics.processed < this.nextCheckpointAt) return;
-
     const position = this.engine.position;
 
-    const checkpoint = await this.deps.jobs.createCheckpoint({
-      jobId: this.jobId,
+    await this.checkpoints.maybeRecord(this.jobId, this.status, {
       partitionIndex: position.partitionIndex,
-      recordPosition: Math.max(0, position.lastFlushedPosition),
+      lastFlushedPosition: position.lastFlushedPosition,
       processedCount: metrics.processed,
-      jobStatus: this.status,
-    });
-
-    this.nextCheckpointAt = metrics.processed + this.settings.checkpointInterval;
-
-    this.deps.events.emit({
-      type: EVENT_TYPE.CHECKPOINT_CREATED,
-      severity: EVENT_SEVERITY.INFO,
-      jobId: this.jobId,
-      partitionIndex: checkpoint.partitionIndex,
-      message:
-        `Checkpoint at ${metrics.processed} records ` +
-        `(partition ${checkpoint.partitionIndex}, record ${checkpoint.recordPosition}).`,
-      payload: {
-        checkpointId: checkpoint.id,
-        processedCount: checkpoint.processedCount,
-        partitionIndex: checkpoint.partitionIndex,
-        recordPosition: checkpoint.recordPosition,
-      },
     });
   }
 
+  // ------------------------------------------------------------------ failure injection
+
+  /**
+   * Crashes the job, freezing the unflushed batch durably (R8.3–R8.5).
+   *
+   * Two properties are essential and both are asserted by tests. No patient row is touched, so every
+   * already-committed derived value survives byte for byte. And the in-flight batch — results computed
+   * but not yet written — is staged to `PendingResult`, which is what carries staleness across the
+   * interruption and gives recovery something genuinely dangerous to reason about.
+   */
+  async crash(): Promise<void> {
+    const next = transition(JOB_ACTION.CRASH, this.status);
+
+    // Stop the loop first, so nothing advances while state is being captured.
+    this.status = next;
+    await this.awaitLoopStop();
+
+    const staged = this.engine?.takeInFlightBatch() ?? [];
+    if (staged.length > 0) {
+      await this.deps.patients.stagePendingResults(staged);
+    }
+
+    this.crashedAt = this.deps.clock.nowIso();
+    await this.setStatus(next, { crashedAt: this.crashedAt });
+    await this.persistCounters();
+
+    const metrics = this.engine?.getMetrics();
+
+    this.deps.events.emit({
+      type: EVENT_TYPE.BACKFILL_CRASHED,
+      severity: EVENT_SEVERITY.CRITICAL,
+      jobId: this.jobId,
+      partitionIndex: this.engine?.position.partitionIndex,
+      message:
+        `BACKFILL CRASHED after ${metrics?.processed ?? 0} records. ` +
+        `${staged.length} computed result(s) were staged but never written — they are now stale ` +
+        `candidates that recovery must revalidate. Committed data is untouched.`,
+      payload: {
+        processed: metrics?.processed ?? 0,
+        stagedResultCount: staged.length,
+        stagedPatientIds: staged.map((entry) => entry.patientId),
+        position: this.engine?.position ?? {},
+      },
+    });
+
+    await this.deps.events.flush();
+  }
+
+  /** Destroys every checkpoint for the job (R7.4). */
+  async loseCheckpoint(): Promise<void> {
+    await this.checkpoints.lose(this.jobId);
+  }
+
+  async getCheckpoint() {
+    return {
+      active: await this.checkpoints.getResumeCursor(this.jobId),
+      lastKnown: await this.checkpoints.getLastKnown(this.jobId),
+      created: this.checkpoints.created,
+    };
+  }
+
+  // ------------------------------------------------------------------ recovery
+
+  /**
+   * Resumes after a crash using data evidence rather than a cursor (R9).
+   *
+   * Note what is deliberately absent: this never consults a checkpoint. Whether one survives is
+   * irrelevant to correctness, which is the claim the demo makes by destroying it first.
+   */
+  async recover(): Promise<RecoverySummary> {
+    const next = transition(JOB_ACTION.RECOVER, this.status);
+    await this.setStatus(next);
+
+    if (!this.engine) {
+      throw new RecoveryFailedError(
+        'no engine state to recover; start a backfill before attempting recovery',
+        { jobId: this.jobId },
+      );
+    }
+
+    try {
+      const recovery = new RecoveryEngine({
+        repository: this.deps.patients,
+        events: this.deps.events,
+        conflicts: this.conflictEngine,
+        jobId: this.jobId,
+        partitionCount: this.settings.partitionCount,
+        phase: 'RECOVERY',
+      });
+
+      const plan = await recovery.computePlan();
+
+      // Mark the range as recovering so the partition grid shows it (R15.4).
+      for (let partition = plan.recoveryStartPartition; partition < this.settings.partitionCount; partition += 1) {
+        this.engine.markPartitionState(partition, PARTITION_STATE.RECOVERING);
+      }
+
+      const summary = await recovery.recover(plan);
+      recovery.emitCompleted();
+
+      this.lastRecoverySummary = summary;
+      this.recoveredAt = this.deps.clock.nowIso();
+
+      /**
+       * Recovery revisits everything from the boundary to the end of the dataset, so once it finishes
+       * there is no forward work left.
+       *
+       * Its *event* counts are folded into the accumulated totals (a conflict during recovery is a real
+       * additional conflict). Its per-record progress is deliberately not carried anywhere: that comes
+       * from the ledger, which already reflects every decision both phases made.
+       */
+      const recoveryCounters = recovery.getCounters();
+      const preRecovery = this.engine.getCounters();
+
+      this.accumulatedEventCounters = {
+        conflicts: preRecovery.conflicts + recoveryCounters.conflicts,
+        protectedUpdates: preRecovery.protectedUpdates + recoveryCounters.protectedUpdates,
+        staleBlocked: preRecovery.staleBlocked + recoveryCounters.staleBlocked,
+      };
+
+      // Zero the engine's own counters so they are not added a second time in buildMetrics.
+      this.engine.setCounters({
+        processed: 0,
+        applied: 0,
+        noopAlreadyCurrent: 0,
+        conflicts: 0,
+        reevaluated: 0,
+        protectedUpdates: 0,
+        staleBlocked: 0,
+        failed: 0,
+      });
+
+      for (let partition = plan.recoveryStartPartition; partition < this.settings.partitionCount; partition += 1) {
+        this.engine.markPartitionState(partition, PARTITION_STATE.COMPLETED);
+      }
+
+      await this.deps.jobs.setStatus(this.jobId, next, { recoveredAt: this.recoveredAt });
+      await this.persistCounters();
+      await this.complete();
+
+      return summary;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.failureReason = reason;
+
+      await this.setStatus(transition(JOB_ACTION.FAIL, this.status), { failureReason: reason });
+
+      this.deps.events.emit({
+        type: EVENT_TYPE.RECORD_FAILED,
+        severity: EVENT_SEVERITY.CRITICAL,
+        jobId: this.jobId,
+        message: `Recovery failed: ${reason}`,
+        payload: { reason },
+      });
+
+      throw error instanceof RecoveryFailedError ? error : new RecoveryFailedError(reason);
+    }
+  }
+
+  getLastRecoverySummary(): RecoverySummary | null {
+    return this.lastRecoverySummary;
+  }
+
+  /**
+   * Persists the same numbers the API reports.
+   *
+   * Deliberately goes through `buildMetrics` rather than reading engine counters directly, so the
+   * stored job row, the dashboard and the verification report can never disagree about a run.
+   */
   private async persistCounters(): Promise<void> {
     if (!this.engine) return;
 
-    const metrics = this.engine.getMetrics();
-    const counters = this.engine.getCounters();
+    const metrics = await this.buildMetrics();
 
     await this.deps.jobs.saveCounters(this.jobId, {
-      processed: counters.processed,
-      applied: counters.applied,
-      noopAlreadyCurrent: counters.noopAlreadyCurrent,
-      conflicts: counters.conflicts,
-      reevaluated: counters.reevaluated,
-      protectedUpdates: counters.protectedUpdates,
-      staleBlocked: counters.staleBlocked,
-      failed: counters.failed,
+      processed: metrics.processed,
+      applied: metrics.applied,
+      noopAlreadyCurrent: metrics.noopAlreadyCurrent,
+      conflicts: metrics.conflicts,
+      reevaluated: metrics.reevaluated,
+      protectedUpdates: metrics.protectedUpdates,
+      staleBlocked: metrics.staleWriteAttemptsBlocked,
+      failed: metrics.failed,
       currentPartition: metrics.currentPartition,
       currentRecordIndex: metrics.currentRecordIndex,
     });
@@ -480,7 +750,7 @@ export class SimulationOrchestrator {
       completedAt: this.completedAt,
     });
 
-    const metrics = this.engine.getMetrics();
+    const metrics = await this.buildMetrics();
 
     this.deps.events.emit({
       type: EVENT_TYPE.BACKFILL_COMPLETED,
