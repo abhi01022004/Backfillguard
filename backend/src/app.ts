@@ -13,6 +13,8 @@ import { createOnlineUpdateRouter } from './api/routes/onlineUpdate';
 import { createCheckpointRouter } from './api/routes/checkpoint';
 import { createVerifyRouter } from './api/routes/verify';
 import { createCompareRouter } from './api/routes/compare';
+import { createEventRouter } from './api/routes/events';
+import type { BufferedDbEventSink } from './infra/events/BufferedDbEventSink';
 import type { Clock } from './lib/clock';
 import type { OnlineUpdateSimulator } from './domain/online/OnlineUpdateSimulator';
 
@@ -21,6 +23,7 @@ export interface AppDeps {
   orchestrator: SimulationOrchestrator;
   onlineUpdates: OnlineUpdateSimulator;
   clock: Clock;
+  events: BufferedDbEventSink;
   health?: HealthDeps;
 }
 
@@ -60,6 +63,7 @@ export function createApp(deps: AppDeps): Express {
   app.use('/api/checkpoint', createCheckpointRouter({ orchestrator: deps.orchestrator }));
   app.use('/api/verify', createVerifyRouter({ orchestrator: deps.orchestrator }));
   app.use('/api/compare', createCompareRouter({ clock: deps.clock }));
+  app.use('/api/events', createEventRouter({ events: deps.events }));
   app.use(
     '/api/online-update',
     createOnlineUpdateRouter({

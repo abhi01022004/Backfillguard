@@ -51,7 +51,9 @@ export class InMemoryEventSink implements EventSink {
     return event;
   }
 
-  recent(limit = TRANSPORT.timelineWindow): SimulationEvent[] {
+  // Annotated as `number` rather than inferred: TRANSPORT is `as const`, so an inferred default would
+  // narrow the parameter to the literal 200 and reject any other limit.
+  recent(limit: number = TRANSPORT.timelineWindow): SimulationEvent[] {
     return this.buffer.slice(-limit);
   }
 
