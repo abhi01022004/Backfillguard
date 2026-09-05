@@ -1,13 +1,18 @@
 import { createApp } from './app';
-import { env, APP_VERSION } from './config/env';
+import { env, APP_VERSION, envSimulationSettings } from './config/env';
 import { logger } from './lib/logger';
+import { createSystemClock } from './lib/clock';
+import { createRng } from './lib/rng';
 import {
   applySqlitePragmas,
   createDatabaseProbe,
   disconnectPrisma,
   getPrismaClient,
 } from './infra/db/prisma';
+import { InMemoryEventSink } from './infra/events/InMemoryEventSink';
 import { PrismaPatientRepository } from './infra/repositories/PrismaPatientRepository';
+import { PrismaJobRepository } from './infra/repositories/PrismaJobRepository';
+import { SimulationOrchestrator } from './domain/orchestrator/SimulationOrchestrator';
 
 /**
  * Composition root.
@@ -22,9 +27,24 @@ async function start(): Promise<void> {
   await applySqlitePragmas(prisma);
 
   const repository = new PrismaPatientRepository(prisma);
+  const jobs = new PrismaJobRepository(prisma);
+
+  const clock = createSystemClock();
+  const events = new InMemoryEventSink(clock);
+
+  const orchestrator = new SimulationOrchestrator({
+    patients: repository,
+    jobs,
+    events,
+    clock,
+    rng: createRng(env.SIM_SEED),
+    seed: env.SIM_SEED,
+    settings: envSimulationSettings,
+  });
 
   const app = createApp({
     repository,
+    orchestrator,
     health: { probeDatabase: createDatabaseProbe(prisma) },
   });
 

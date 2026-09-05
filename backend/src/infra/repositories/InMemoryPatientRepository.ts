@@ -1,7 +1,10 @@
 import {
   BACKFILL_STATUS,
+  CONFLICT_RESOLUTION,
   type ActorType,
   type BackfillStatus,
+  type ConflictRecord,
+  type ConflictResolution,
   type FieldChange,
   type Paginated,
   type Patient,
@@ -10,6 +13,7 @@ import {
 } from '@bg/shared';
 import type {
   ClinicalSnapshot,
+  ConflictEntry,
   ConsiderationEntry,
   DerivedFields,
   GuardedWriteResult,
@@ -42,11 +46,13 @@ export class InMemoryPatientRepository implements PatientRepository {
   private writes: (WriteLedgerEntry & { id: number; createdAt: string })[] = [];
   private onlineUpdates: (OnlineUpdateWrite & { id: number; createdAt: string })[] = [];
   private staged: PendingResultRecord[] = [];
+  private conflicts: ConflictRecord[] = [];
 
   private nextPatientId = 1;
   private nextWriteId = 1;
   private nextUpdateId = 1;
   private nextStagedId = 1;
+  private nextConflictId = 1;
 
   /**
    * A monotonic counter used in place of timestamps.
@@ -335,6 +341,55 @@ export class InMemoryPatientRepository implements PatientRepository {
     return this.writes.filter((write) => write.jobId === jobId).map((write) => ({ ...write }));
   }
 
+  // ---------------------------------------------------------------- conflicts
+
+  async recordConflict(entry: ConflictEntry): Promise<number> {
+    const id = this.nextConflictId++;
+
+    this.conflicts.push({
+      id,
+      jobId: entry.jobId,
+      patientId: entry.patientId,
+      patientCode: this.patients.get(entry.patientId)?.patientCode ?? `#${entry.patientId}`,
+      sourceVersion: entry.sourceVersion,
+      currentVersion: entry.currentVersion,
+      oldScore: entry.oldScore,
+      newScore: null,
+      changedFields: entry.changedFields.map((change) => ({ ...change })),
+      resolution: CONFLICT_RESOLUTION.PENDING,
+      detectedAt: this.stamp(),
+      resolvedAt: null,
+    });
+
+    return id;
+  }
+
+  async resolveConflict(
+    conflictId: number,
+    resolution: ConflictResolution,
+    newScore: number | null,
+  ): Promise<void> {
+    const conflict = this.conflicts.find((candidate) => candidate.id === conflictId);
+    if (!conflict) {
+      throw new Error(`InMemoryPatientRepository: conflict ${conflictId} does not exist`);
+    }
+    conflict.resolution = resolution;
+    conflict.newScore = newScore;
+    conflict.resolvedAt = this.stamp();
+  }
+
+  async listConflicts(jobId: string): Promise<ConflictRecord[]> {
+    return this.conflicts
+      .filter((conflict) => conflict.jobId === jobId)
+      .map((conflict) => ({ ...conflict, changedFields: [...conflict.changedFields] }));
+  }
+
+  async openConflictCount(jobId: string): Promise<number> {
+    return this.conflicts.filter(
+      (conflict) => conflict.jobId === jobId && conflict.resolution === CONFLICT_RESOLUTION.PENDING,
+    ).length;
+  }
+
   // ---------------------------------------------------------------- staged results
 
   async stagePendingResults(entries: PendingResultWrite[]): Promise<void> {
@@ -373,10 +428,12 @@ export class InMemoryPatientRepository implements PatientRepository {
     this.writes = [];
     this.onlineUpdates = [];
     this.staged = [];
+    this.conflicts = [];
     this.nextPatientId = 1;
     this.nextWriteId = 1;
     this.nextUpdateId = 1;
     this.nextStagedId = 1;
+    this.nextConflictId = 1;
 
     for (const patient of patients) {
       const id = this.nextPatientId++;
@@ -390,6 +447,7 @@ export class InMemoryPatientRepository implements PatientRepository {
     this.writes = [];
     this.onlineUpdates = [];
     this.staged = [];
+    this.conflicts = [];
 
     for (const patient of this.patients.values()) {
       patient.riskScore = null;

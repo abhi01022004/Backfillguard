@@ -1,6 +1,8 @@
 import type {
   ActorType,
   BackfillStatus,
+  ConflictRecord,
+  ConflictResolution,
   ConsiderationOutcome,
   Diagnosis,
   FieldChange,
@@ -103,6 +105,19 @@ export interface PendingResultRecord extends PendingResultWrite {
   createdAt: string;
 }
 
+export interface ConflictEntry {
+  jobId: string;
+  patientId: number;
+  /** Version the refused computation was based on. */
+  sourceVersion: number;
+  /** Version the row had actually reached. */
+  currentVersion: number;
+  /** The score that was computed from stale data and refused. */
+  oldScore: number;
+  /** Which clinical inputs moved between the read and the attempted write. */
+  changedFields: FieldChange[];
+}
+
 export interface PatientQuery {
   page: number;
   pageSize: number;
@@ -202,6 +217,22 @@ export interface PatientRepository {
   listConsiderations(jobId: string): Promise<(ConsiderationEntry & { decidedAt: string })[]>;
 
   listWriteLedger(jobId: string): Promise<(WriteLedgerEntry & { id: number; createdAt: string })[]>;
+
+  // --- conflicts: detected version collisions and how each was resolved ---
+
+  /** Records a detected conflict and returns its id so the resolution can be attached later. */
+  recordConflict(entry: ConflictEntry): Promise<number>;
+
+  resolveConflict(
+    conflictId: number,
+    resolution: ConflictResolution,
+    newScore: number | null,
+  ): Promise<void>;
+
+  listConflicts(jobId: string): Promise<ConflictRecord[]>;
+
+  /** Conflicts still awaiting resolution. A completed job must have none (verification check C6). */
+  openConflictCount(jobId: string): Promise<number>;
 
   // --- staged results: the durable source of staleness across a crash ---
 

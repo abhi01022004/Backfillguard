@@ -1,7 +1,10 @@
 import {
   BACKFILL_STATUS,
+  CONFLICT_RESOLUTION,
   type ActorType,
   type BackfillStatus,
+  type ConflictRecord,
+  type ConflictResolution,
   type Diagnosis,
   type FieldChange,
   type Paginated,
@@ -12,6 +15,7 @@ import {
 import type { Patient as PrismaPatient, PrismaClient } from '../../generated/prisma/client';
 import type {
   ClinicalSnapshot,
+  ConflictEntry,
   ConsiderationEntry,
   DerivedFields,
   GuardedWriteResult,
@@ -435,6 +439,64 @@ export class PrismaPatientRepository implements PatientRepository {
       phase: row.phase,
       createdAt: row.createdAt.toISOString(),
     }));
+  }
+
+  // ---------------------------------------------------------------- conflicts
+
+  async recordConflict(entry: ConflictEntry): Promise<number> {
+    const row = await this.prisma.conflict.create({
+      data: {
+        jobId: entry.jobId,
+        patientId: entry.patientId,
+        sourceVersion: entry.sourceVersion,
+        currentVersion: entry.currentVersion,
+        oldScore: entry.oldScore,
+        changedFields: JSON.stringify(entry.changedFields),
+        resolution: CONFLICT_RESOLUTION.PENDING,
+      },
+      select: { id: true },
+    });
+    return row.id;
+  }
+
+  async resolveConflict(
+    conflictId: number,
+    resolution: ConflictResolution,
+    newScore: number | null,
+  ): Promise<void> {
+    await this.prisma.conflict.update({
+      where: { id: conflictId },
+      data: { resolution, newScore, resolvedAt: new Date() },
+    });
+  }
+
+  async listConflicts(jobId: string): Promise<ConflictRecord[]> {
+    const rows = await this.prisma.conflict.findMany({
+      where: { jobId },
+      orderBy: { id: 'asc' },
+      include: { patient: { select: { patientCode: true } } },
+    });
+
+    return rows.map((row) => ({
+      id: row.id,
+      jobId: row.jobId,
+      patientId: row.patientId,
+      patientCode: row.patient.patientCode,
+      sourceVersion: row.sourceVersion,
+      currentVersion: row.currentVersion,
+      oldScore: row.oldScore,
+      newScore: row.newScore,
+      changedFields: JSON.parse(row.changedFields) as FieldChange[],
+      resolution: row.resolution as ConflictResolution,
+      detectedAt: row.detectedAt.toISOString(),
+      resolvedAt: row.resolvedAt?.toISOString() ?? null,
+    }));
+  }
+
+  async openConflictCount(jobId: string): Promise<number> {
+    return this.prisma.conflict.count({
+      where: { jobId, resolution: CONFLICT_RESOLUTION.PENDING },
+    });
   }
 
   // ---------------------------------------------------------------- staged results
