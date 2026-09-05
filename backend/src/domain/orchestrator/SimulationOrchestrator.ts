@@ -6,11 +6,13 @@ import {
   CONSIDERATION_OUTCOME,
   JOB_STATUS,
   PARTITION_STATE,
+  VERIFICATION_VERDICT,
   type BackfillJobState,
   type JobMetrics,
   type JobStatus,
   type RecoverySummary,
   type SimulationSettings,
+  type VerificationReport,
 } from '@bg/shared';
 import type { Clock } from '../../lib/clock';
 import type { Rng } from '../../lib/rng';
@@ -22,10 +24,12 @@ import { BackfillEngine, type EngineCounters } from '../engine/BackfillEngine';
 import { CheckpointManager } from '../engine/CheckpointManager';
 import { ConflictEngine } from '../engine/ConflictEngine';
 import { RecoveryEngine } from '../engine/RecoveryEngine';
+import { VerificationEngine } from '../verify/VerificationEngine';
 import {
   JOB_ACTION,
   isActivelyProcessing,
   isDatasetLocked,
+  resolveVerificationResult,
   transition,
 } from '../engine/jobStateMachine';
 
@@ -121,6 +125,15 @@ export class SimulationOrchestrator {
   private accumulatedEventCounters = { conflicts: 0, protectedUpdates: 0, staleBlocked: 0 };
 
   private lastRecoverySummary: RecoverySummary | null = null;
+
+  /**
+   * The most recent audit.
+   *
+   * Held in memory rather than persisted: a report is entirely derivable from stored state, so caching it
+   * avoids a table whose only job would be to go stale. Null until verification has run, which is what
+   * lets the report page say so instead of showing empty numbers (R20.7).
+   */
+  private lastReport: VerificationReport | null = null;
 
   private startedAt: string | null = null;
   private completedAt: string | null = null;
@@ -672,6 +685,50 @@ export class SimulationOrchestrator {
 
   getLastRecoverySummary(): RecoverySummary | null {
     return this.lastRecoverySummary;
+  }
+
+  // ------------------------------------------------------------------ verification
+
+  /**
+   * Runs the independent audit and records its verdict on the job (R11).
+   *
+   * The state machine only permits this from a settled state, so verification always describes a finished
+   * run rather than a moving target. The engine it constructs receives repositories only — never this
+   * orchestrator, and never any counter — which is what makes the audit independent of the thing it is
+   * auditing.
+   */
+  async runVerification(): Promise<VerificationReport> {
+    const verifying = transition(JOB_ACTION.VERIFY, this.status);
+    await this.setStatus(verifying);
+
+    try {
+      const verifier = new VerificationEngine({
+        patients: this.deps.patients,
+        jobs: this.deps.jobs,
+        events: this.deps.events,
+        clock: this.deps.clock,
+      });
+
+      const report = await verifier.verify(this.jobId);
+      this.lastReport = report;
+
+      const verdictStatus = resolveVerificationResult(
+        report.verdict === VERIFICATION_VERDICT.VERIFIED_SAFE,
+      );
+      transition(JOB_ACTION.FINISH_VERIFICATION, this.status);
+      await this.setStatus(verdictStatus);
+
+      return report;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      this.failureReason = reason;
+      await this.setStatus(transition(JOB_ACTION.FAIL, this.status), { failureReason: reason });
+      throw error;
+    }
+  }
+
+  getLastReport(): VerificationReport | null {
+    return this.lastReport;
   }
 
   /**

@@ -465,6 +465,55 @@ export class InMemoryPatientRepository implements PatientRepository {
       this.nextPatientId = Math.max(this.nextPatientId, patient.id + 1);
     }
   }
+
+  // ---------------------------------------------------------------- corruption helpers
+
+  /**
+   * Deliberate corruption, for falsifiability testing only.
+   *
+   * The verification engine's value rests entirely on being able to fail. These helpers exist so the
+   * suite can break each invariant on purpose — delete a ledger row, corrupt a stored score, revert a
+   * clinical value — and prove the audit notices.
+   *
+   * They bypass every guard on purpose, which is exactly why they live here, named `...ForTest`, on the
+   * in-memory adapter only. There is no equivalent on the SQLite adapter and no route reaches them, so
+   * production code has no path to this behaviour.
+   */
+  deleteConsiderationForTest(jobId: string, patientId: number): void {
+    this.considerations.delete(this.key(jobId, patientId));
+  }
+
+  forceScoreForTest(patientId: number, riskScore: number | null): void {
+    const patient = this.mustFindForTest(patientId);
+    patient.riskScore = riskScore;
+  }
+
+  forceLevelForTest(patientId: number, riskLevel: RiskLevel | null): void {
+    const patient = this.mustFindForTest(patientId);
+    patient.riskLevel = riskLevel;
+  }
+
+  forceClinicalValueForTest(
+    patientId: number,
+    field: 'glucose' | 'heartRate' | 'bloodPressureSystolic' | 'bloodPressureDiastolic',
+    value: number,
+  ): void {
+    const patient = this.mustFindForTest(patientId);
+    patient[field] = value;
+  }
+
+  forceLastBackfillVersionForTest(patientId: number, version: number | null): void {
+    const patient = this.mustFindForTest(patientId);
+    patient.lastBackfillVersion = version;
+  }
+
+  private mustFindForTest(patientId: number): Patient {
+    const patient = this.patients.get(patientId);
+    if (!patient) {
+      throw new Error(`InMemoryPatientRepository: patient ${patientId} does not exist`);
+    }
+    return patient;
+  }
 }
 
 /** Convenience for tests and the comparison harness. */

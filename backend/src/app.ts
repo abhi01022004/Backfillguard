@@ -11,6 +11,7 @@ import { createDatasetRouter } from './api/routes/dataset';
 import { createBackfillRouter } from './api/routes/backfill';
 import { createOnlineUpdateRouter } from './api/routes/onlineUpdate';
 import { createCheckpointRouter } from './api/routes/checkpoint';
+import { createVerifyRouter } from './api/routes/verify';
 import type { OnlineUpdateSimulator } from './domain/online/OnlineUpdateSimulator';
 
 export interface AppDeps {
@@ -54,6 +55,7 @@ export function createApp(deps: AppDeps): Express {
     createBackfillRouter({ orchestrator: deps.orchestrator, repository: deps.repository }),
   );
   app.use('/api/checkpoint', createCheckpointRouter({ orchestrator: deps.orchestrator }));
+  app.use('/api/verify', createVerifyRouter({ orchestrator: deps.orchestrator }));
   app.use(
     '/api/online-update',
     createOnlineUpdateRouter({

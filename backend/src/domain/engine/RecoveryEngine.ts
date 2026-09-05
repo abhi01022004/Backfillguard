@@ -90,6 +90,20 @@ export class RecoveryEngine {
     failed: 0,
   };
 
+  /**
+   * Records already decided during this recovery pass.
+   *
+   * Staged results are handled before the range scan, and the scan covers the same partitions. Without
+   * this set, a record re-evaluated during staged handling would be revisited moments later, found
+   * current, and have its `REEVALUATED_APPLIED` ledger outcome overwritten by
+   * `NO_ACTION_ALREADY_CURRENT` — the ledger is keyed per record, so the last writer wins.
+   *
+   * That silently erased the evidence that a conflict had been resolved: coverage still looked correct,
+   * but the report showed zero re-evaluations for work it had genuinely done. Skipping these records also
+   * avoids re-reading rows that were decided seconds earlier.
+   */
+  private decidedThisPass = new Set<number>();
+
   constructor(private readonly deps: RecoveryEngineDeps) {}
 
   getSummary(): RecoverySummary {
@@ -214,6 +228,14 @@ export class RecoveryEngine {
         continue;
       }
 
+      /**
+       * Marked here, covering every branch below.
+       *
+       * Each remaining path records a terminal decision for this record, so the range scan must not
+       * revisit it and overwrite that outcome with a no-op.
+       */
+      this.decidedThisPass.add(entry.patientId);
+
       if (patient.version !== entry.sourceVersion) {
         // Stale. Refuse it, then resolve the record properly by recomputing from current data.
         await this.deps.repository.setPendingResultState(entry.id, PENDING_RESULT_STATE.REJECTED);
@@ -337,6 +359,10 @@ export class RecoveryEngine {
       const records = await this.deps.repository.findByPartition(partition);
 
       for (const record of records) {
+        // Already decided moments ago while revalidating staged results. Revisiting would overwrite that
+        // record's outcome with a no-op and erase the evidence that a conflict was resolved.
+        if (this.decidedThisPass.has(record.id)) continue;
+
         this.summary.recordsRevisited += 1;
 
         // Re-read: an earlier step in this same recovery pass may have changed the row.
