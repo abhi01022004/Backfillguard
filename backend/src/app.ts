@@ -14,14 +14,17 @@ import { createCheckpointRouter } from './api/routes/checkpoint';
 import { createVerifyRouter } from './api/routes/verify';
 import { createCompareRouter } from './api/routes/compare';
 import { createEventRouter } from './api/routes/events';
+import { createScenarioRouter } from './api/routes/scenario';
 import type { BufferedDbEventSink } from './infra/events/BufferedDbEventSink';
 import type { Clock } from './lib/clock';
 import type { OnlineUpdateSimulator } from './domain/online/OnlineUpdateSimulator';
+import type { ScenarioManager } from './domain/scenario/ScenarioManager';
 
 export interface AppDeps {
   repository: PatientRepository;
   orchestrator: SimulationOrchestrator;
   onlineUpdates: OnlineUpdateSimulator;
+  scenarios: ScenarioManager;
   clock: Clock;
   events: BufferedDbEventSink;
   health?: HealthDeps;
@@ -64,6 +67,10 @@ export function createApp(deps: AppDeps): Express {
   app.use('/api/verify', createVerifyRouter({ orchestrator: deps.orchestrator }));
   app.use('/api/compare', createCompareRouter({ clock: deps.clock }));
   app.use('/api/events', createEventRouter({ events: deps.events }));
+  app.use(
+    '/api/scenario',
+    createScenarioRouter({ scenarios: deps.scenarios, orchestrator: deps.orchestrator }),
+  );
   app.use(
     '/api/online-update',
     createOnlineUpdateRouter({

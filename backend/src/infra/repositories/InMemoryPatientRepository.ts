@@ -18,6 +18,7 @@ import type {
   DerivedFields,
   GuardedWriteResult,
   OnlineUpdateWrite,
+  PatientEvidence,
   PatientQuery,
   PatientRepository,
   PendingResultRecord,
@@ -339,6 +340,21 @@ export class InMemoryPatientRepository implements PatientRepository {
     jobId: string,
   ): Promise<(WriteLedgerEntry & { id: number; createdAt: string })[]> {
     return this.writes.filter((write) => write.jobId === jobId).map((write) => ({ ...write }));
+  }
+
+  async patientEvidence(patientId: number): Promise<PatientEvidence> {
+    return {
+      onlineUpdates: await this.listOnlineUpdates(patientId),
+      writes: this.writes
+        .filter((write) => write.patientId === patientId)
+        .map((write) => ({ ...write })),
+      conflicts: this.conflicts
+        .filter((conflict) => conflict.patientId === patientId)
+        .map((conflict) => ({ ...conflict, changedFields: [...conflict.changedFields] })),
+      considerations: [...this.considerations.values()]
+        .filter((entry) => entry.patientId === patientId)
+        .map((entry) => ({ ...entry })),
+    };
   }
 
   // ---------------------------------------------------------------- conflicts

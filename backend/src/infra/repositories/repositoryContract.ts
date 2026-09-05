@@ -446,6 +446,74 @@ export function runPatientRepositoryContract(harness: ContractHarness): void {
       expect(await repository.consideredPatientIds('OTHER-JOB')).toEqual([target.id]);
     });
 
+    // ------------------------------------------------------------------ per-patient evidence
+
+    it('gathers one patient\'s evidence across jobs and excludes other patients', async () => {
+      // Deliberately spans two jobs: a record's history belongs to the record, not to a run, and the
+      // per-patient timeline would silently lose evidence if this filtered by the current job.
+      const target = patients[17]!;
+      const other = patients[18]!;
+
+      await repository.applyOnlineUpdate(
+        target.id,
+        target.version,
+        { glucose: 205 },
+        ACTOR_TYPE.LAB,
+        UPDATE_SOURCE.SCRIPTED,
+      );
+
+      await repository.applyGuarded(
+        target.id,
+        target.version,
+        { riskScore: 44, riskLevel: RISK_LEVEL.MEDIUM, backfillStatus: BACKFILL_STATUS.COMPLETED },
+        LEDGER,
+      );
+
+      const conflictId = await repository.recordConflict({
+        jobId: 'OTHER-JOB',
+        patientId: target.id,
+        sourceVersion: target.version,
+        currentVersion: target.version + 1,
+        oldScore: 44,
+        changedFields: [{ field: 'glucose', from: target.glucose, to: 205 }],
+      });
+      await repository.resolveConflict(conflictId, 'REEVALUATED', 59);
+
+      await repository.recordConsideration({
+        jobId: 'OTHER-JOB',
+        patientId: target.id,
+        outcome: CONSIDERATION_OUTCOME.NO_ACTION_ALREADY_CURRENT,
+        sourceVersion: target.version + 1,
+        appliedVersion: target.version + 1,
+        attempts: 1,
+        phase: 'RECOVERY',
+        reason: null,
+      });
+
+      const evidence = await repository.patientEvidence(target.id);
+
+      expect(evidence.onlineUpdates).toHaveLength(1);
+      expect(evidence.onlineUpdates[0]!.newVersion).toBe(target.version + 1);
+
+      // The guarded write was refused: it was guarded at a version the online update had already moved.
+      expect(evidence.writes).toHaveLength(1);
+      expect(evidence.writes[0]!.applied).toBe(false);
+
+      expect(evidence.conflicts).toHaveLength(1);
+      expect(evidence.conflicts[0]!.resolution).toBe('REEVALUATED');
+      expect(evidence.conflicts[0]!.newScore).toBe(59);
+      expect(evidence.conflicts[0]!.patientCode).toBe(target.patientCode);
+
+      expect(evidence.considerations).toHaveLength(1);
+      expect(evidence.considerations[0]!.phase).toBe('RECOVERY');
+
+      const untouched = await repository.patientEvidence(other.id);
+      expect(untouched.onlineUpdates).toEqual([]);
+      expect(untouched.writes).toEqual([]);
+      expect(untouched.conflicts).toEqual([]);
+      expect(untouched.considerations).toEqual([]);
+    });
+
     // ------------------------------------------------------------------ staged results
 
     it('stages results and preserves the read-time snapshot and version', async () => {

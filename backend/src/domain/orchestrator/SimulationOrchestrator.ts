@@ -886,12 +886,21 @@ export class SimulationOrchestrator {
   }
 
   /**
-   * Drives the simulation to completion with no pacing.
+   * Drives the simulation to completion in the caller's own loop.
    *
-   * For tests and for the headless scenario run. The tick cap is a safety net: an engine bug that
-   * failed to make progress would otherwise hang the suite instead of failing it.
+   * Used by tests (unpaced, so a suite runs in milliseconds) and by the scripted demo (paced, so it is
+   * watchable). The scenario runner deliberately drives from here rather than letting `start()` spin up
+   * the background loop, for a reason that is not obvious: a participant that calls `crash()` while the
+   * background loop is running would deadlock, because `crash()` awaits the loop it is itself running
+   * inside. Driving externally means `this.loop` is null and there is nothing to await.
+   *
+   * The tick cap is a safety net: an engine bug that failed to make progress would otherwise hang the
+   * caller instead of failing it.
    */
-  async runToCompletion(maxTicks = 200_000): Promise<void> {
+  async runToCompletion(
+    options: { maxTicks?: number; delayMs?: number } = {},
+  ): Promise<void> {
+    const { maxTicks = 200_000, delayMs = 0 } = options;
     let ticks = 0;
 
     while (isActivelyProcessing(this.status)) {
@@ -908,6 +917,10 @@ export class SimulationOrchestrator {
         await this.complete();
         return;
       }
+
+      // Skipped entirely at zero delay: a manual test clock has nothing to resolve a sleep with, so
+      // awaiting one would hang rather than run fast.
+      if (delayMs > 0) await this.deps.clock.sleep(delayMs);
     }
   }
 

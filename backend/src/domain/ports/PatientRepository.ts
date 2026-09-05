@@ -118,6 +118,25 @@ export interface ConflictEntry {
   changedFields: FieldChange[];
 }
 
+/**
+ * Every durable trace of one patient, gathered in a single call (R16.4).
+ *
+ * Deliberately *not* scoped to a job. A record's history is a property of the record, not of a run: a
+ * patient can be touched by an initial pass and again by recovery, and the point of the per-patient
+ * timeline is to show those interleaved with the online updates that caused the interesting behaviour.
+ * Filtering by the current job would silently drop evidence.
+ *
+ * Also deliberately one coarse method rather than four fine-grained ones. The four lists are only ever
+ * wanted together — a partial history is not a meaningful thing to ask for — and one round trip beats
+ * four for a view opened per row in a table.
+ */
+export interface PatientEvidence {
+  onlineUpdates: (OnlineUpdateWrite & { id: number; createdAt: string })[];
+  writes: (WriteLedgerEntry & { id: number; createdAt: string })[];
+  conflicts: ConflictRecord[];
+  considerations: (ConsiderationEntry & { decidedAt: string })[];
+}
+
 export interface PatientQuery {
   page: number;
   pageSize: number;
@@ -217,6 +236,9 @@ export interface PatientRepository {
   listConsiderations(jobId: string): Promise<(ConsiderationEntry & { decidedAt: string })[]>;
 
   listWriteLedger(jobId: string): Promise<(WriteLedgerEntry & { id: number; createdAt: string })[]>;
+
+  /** All durable traces of one patient, across every job. Feeds the per-patient timeline (R16.4). */
+  patientEvidence(patientId: number): Promise<PatientEvidence>;
 
   // --- conflicts: detected version collisions and how each was resolved ---
 

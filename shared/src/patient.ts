@@ -125,6 +125,16 @@ export interface PatientDetail {
   /** Recomputed live from current values, so the UI can show why the score is what it is. */
   risk: RiskResult | null;
   history: PatientHistoryEntry[];
+  /** Shown wherever the score appears (R3.7). */
+  disclaimer: string;
+  /**
+   * Whether `patient.riskScore` still matches a recomputation from current values.
+   *
+   * Null when the record has never been scored. False is *not* necessarily a fault: it is the visible
+   * form of post-consideration drift, where an online update landed after the record was correctly
+   * considered. Verification check C4 is what distinguishes drift from a genuine inconsistency.
+   */
+  storedScoreMatchesCurrentData: boolean | null;
 }
 
 /**
@@ -132,9 +142,15 @@ export interface PatientDetail {
  * outcomes, conflicts and re-evaluations interleaved in chronological order.
  */
 export interface PatientHistoryEntry {
+  /**
+   * Note the absence of a `BACKFILL_READ` kind, which an earlier draft of this type carried.
+   *
+   * Nothing durable records a per-record read, so an entry claiming one would have to be inferred
+   * rather than evidenced — and it would add no information anyway: `WRITE_APPLIED.version` and
+   * `WRITE_REJECTED.version` already state exactly which source version the computation read.
+   */
   kind:
     | 'ONLINE_UPDATE'
-    | 'BACKFILL_READ'
     | 'WRITE_APPLIED'
     | 'WRITE_REJECTED'
     | 'CONFLICT'

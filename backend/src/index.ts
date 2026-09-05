@@ -18,6 +18,7 @@ import { PrismaPatientRepository } from './infra/repositories/PrismaPatientRepos
 import { PrismaJobRepository } from './infra/repositories/PrismaJobRepository';
 import { SimulationOrchestrator } from './domain/orchestrator/SimulationOrchestrator';
 import { OnlineUpdateSimulator } from './domain/online/OnlineUpdateSimulator';
+import { ScenarioManager } from './domain/scenario/ScenarioManager';
 
 /**
  * Composition root.
@@ -84,10 +85,26 @@ async function start(): Promise<void> {
   onlineUpdates.configureAuto(envSimulationSettings.onlineUpdateFrequency);
   orchestrator.register(onlineUpdates.asTickParticipant());
 
+  /**
+   * Registered once, for the process's lifetime.
+   *
+   * Participant registration survives both `start()` and `reset()`, so the manager stays wired across
+   * repeated demo runs. Its tick hook is inert unless a demo is actually running.
+   */
+  const scenarios = new ScenarioManager({
+    orchestrator,
+    simulator: onlineUpdates,
+    repository,
+    events,
+    clock,
+  });
+  orchestrator.register(scenarios);
+
   const app = createApp({
     repository,
     orchestrator,
     onlineUpdates,
+    scenarios,
     clock,
     events: persistedSink,
     health: { probeDatabase: createDatabaseProbe(prisma) },

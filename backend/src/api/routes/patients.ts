@@ -1,6 +1,14 @@
 import { Router } from 'express';
-import { DISCLAIMER, type BackfillStatus, type Paginated, type Patient, type RiskLevel } from '@bg/shared';
+import {
+  DISCLAIMER,
+  type BackfillStatus,
+  type Paginated,
+  type Patient,
+  type PatientDetail,
+  type RiskLevel,
+} from '@bg/shared';
 import type { PatientRepository } from '../../domain/ports/PatientRepository';
+import { buildPatientHistory } from '../../domain/patient/patientHistory';
 import { calculateRiskScore, toRiskInput } from '../../domain/risk/riskCalculator';
 import { PatientNotFoundError } from '../../lib/errors';
 import { validate, validatedParams, validatedQuery } from '../middleware/validate';
@@ -68,14 +76,25 @@ export function createPatientRouter({ repository }: PatientRoutesDeps): Router {
          */
         const risk = calculateRiskScore(toRiskInput(patient));
 
-        // The merged version history arrives with task 17.
-        res.json({
+        /**
+         * History ships with the detail rather than behind a separate `/history` endpoint.
+         *
+         * The drawer that consumes this always wants both, so splitting them would mean two requests
+         * per row opened and a second endpoint whose response is a strict subset of this one — extra
+         * surface to secure, validate and keep consistent, for no caller.
+         */
+        const history = buildPatientHistory(await repository.patientEvidence(patient.id));
+
+        const detail: PatientDetail = {
           patient,
           risk,
+          history,
           disclaimer: DISCLAIMER.RISK_SCORE,
           storedScoreMatchesCurrentData:
             patient.riskScore === null ? null : patient.riskScore === risk.score,
-        });
+        };
+
+        res.json(detail);
       } catch (error) {
         next(error);
       }

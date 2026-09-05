@@ -20,6 +20,7 @@ import type {
   DerivedFields,
   GuardedWriteResult,
   OnlineUpdateWrite,
+  PatientEvidence,
   PatientQuery,
   PatientRepository,
   PendingResultRecord,
@@ -439,6 +440,72 @@ export class PrismaPatientRepository implements PatientRepository {
       phase: row.phase,
       createdAt: row.createdAt.toISOString(),
     }));
+  }
+
+  /**
+   * Gathers one patient's whole durable trace.
+   *
+   * Four independent queries rather than one join: the tables share only `patientId`, and joining them
+   * would produce a cross product rather than a timeline. Merging into chronological order is a domain
+   * concern (`buildPatientHistory`), kept out of SQL so it can be unit tested without a database.
+   */
+  async patientEvidence(patientId: number): Promise<PatientEvidence> {
+    const [onlineUpdates, writeRows, conflictRows, considerationRows] = await Promise.all([
+      this.listOnlineUpdates(patientId),
+      this.prisma.writeLedger.findMany({ where: { patientId }, orderBy: { id: 'asc' } }),
+      this.prisma.conflict.findMany({
+        where: { patientId },
+        orderBy: { id: 'asc' },
+        include: { patient: { select: { patientCode: true } } },
+      }),
+      this.prisma.considerationLedger.findMany({
+        where: { patientId },
+        orderBy: { decidedAt: 'asc' },
+      }),
+    ]);
+
+    return {
+      onlineUpdates,
+      writes: writeRows.map((row) => ({
+        id: row.id,
+        jobId: row.jobId,
+        patientId: row.patientId,
+        guardVersion: row.guardVersion,
+        rowVersionAtWrite: row.rowVersionAtWrite,
+        applied: row.applied,
+        guarded: row.guarded,
+        wroteSourceFields: row.wroteSourceFields,
+        scoreWritten: row.scoreWritten,
+        resultingLastBfVer: row.resultingLastBfVer,
+        phase: row.phase,
+        createdAt: row.createdAt.toISOString(),
+      })),
+      conflicts: conflictRows.map((row) => ({
+        id: row.id,
+        jobId: row.jobId,
+        patientId: row.patientId,
+        patientCode: row.patient.patientCode,
+        sourceVersion: row.sourceVersion,
+        currentVersion: row.currentVersion,
+        oldScore: row.oldScore,
+        newScore: row.newScore,
+        changedFields: JSON.parse(row.changedFields) as FieldChange[],
+        resolution: row.resolution as ConflictResolution,
+        detectedAt: row.detectedAt.toISOString(),
+        resolvedAt: row.resolvedAt?.toISOString() ?? null,
+      })),
+      considerations: considerationRows.map((row) => ({
+        jobId: row.jobId,
+        patientId: row.patientId,
+        outcome: row.outcome as ConsiderationEntry['outcome'],
+        sourceVersion: row.sourceVersion,
+        appliedVersion: row.appliedVersion,
+        attempts: row.attempts,
+        phase: row.phase,
+        reason: row.reason,
+        decidedAt: row.decidedAt.toISOString(),
+      })),
+    };
   }
 
   // ---------------------------------------------------------------- conflicts
