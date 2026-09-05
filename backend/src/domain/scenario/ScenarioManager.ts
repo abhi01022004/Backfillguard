@@ -21,6 +21,7 @@ import type {
 import {
   DEMO_ACTION,
   DEMO_SCRIPT,
+  DEMO_STEP_DWELL_MS,
   DEMO_TRIGGER,
   findLevelCrossingChange,
   resolveDemoPlan,
@@ -67,6 +68,22 @@ export interface ScenarioManagerDeps {
    */
   prepareDataset?: () => Promise<void>;
   /**
+   * Milliseconds to hold each post-crash step so a viewer can read it.
+   *
+   * ## Why a deliberate pause exists at all
+   *
+   * The outage steps — crash, clinical update, destroy checkpoint, recover — used to fire back to back with no
+   * gap. Correct, and unwatchable: a live measurement found the `CRASHED` state lasted under 250 ms, so the
+   * dashboard panel that explains what a crash means was on screen for about a fifth of a second. The most
+   * dramatic moment of the demo was effectively invisible.
+   *
+   * This is pacing, not sequencing. It changes how long the demo takes in wall-clock terms and nothing about
+   * the order in which anything happens, so the run stays reproducible — exactly the same distinction
+   * `backfillSpeed` already relies on. Zero in tests, where nobody is watching and a manual clock cannot
+   * resolve a sleep.
+   */
+  stepDwellMs?: number;
+  /**
    * Milliseconds to wait between ticks. Defaults to the script's speed.
    *
    * Zero drives the run as fast as it will go, which is what the test suite uses: a manual clock has
@@ -104,10 +121,12 @@ export class ScenarioManager implements TickParticipant {
   private stagedCodesAtCrash: string[] = [];
 
   private readonly tickDelayMs: number;
+  private readonly stepDwellMs: number;
 
   constructor(private readonly deps: ScenarioManagerDeps) {
     this.tickDelayMs =
       deps.tickDelayMs ?? Math.max(1, Math.round(1000 / this.script.settings.backfillSpeed));
+    this.stepDwellMs = deps.stepDwellMs ?? DEMO_STEP_DWELL_MS;
 
     // Thresholds are placeholders until a run resolves them against the real record count; the step
     // list is published before then so the UI can show what the demo will do.
@@ -395,6 +414,16 @@ export class ScenarioManager implements TickParticipant {
       if (entry.status !== 'PENDING') continue;
       if (entry.step.trigger !== trigger) continue;
       if (this.aborted) return;
+
+      /**
+       * Hold the previous state before advancing.
+       *
+       * Before the step, not after, so the state the *last* step produced stays on screen long enough to read.
+       * The crash is the case that matters: without this the dashboard went from CRASHED to RECOVERING in under
+       * 250 ms and the panel explaining the crash never registered.
+       */
+      if (this.stepDwellMs > 0) await this.deps.clock.sleep(this.stepDwellMs);
+
       await this.executeStep(entry, null);
     }
   }

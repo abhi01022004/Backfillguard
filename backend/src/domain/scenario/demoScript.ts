@@ -137,21 +137,37 @@ export interface DemoScript {
 /**
  * Measured wall-clock duration of a full demo run (R24.4).
  *
- * Measured, not estimated: three consecutive runs on the default 1,000-record SQLite dataset took 12.3s, 11.9s
- * and 11.6s end to end — start, two in-flight collisions, crash, outage update, checkpoint destruction,
+ * Measured, not estimated: three consecutive runs on the default 1,000-record SQLite dataset took 18.9s, 18.9s
+ * and 18.7s end to end — start, two in-flight collisions, crash, outage update, checkpoint destruction,
  * evidence-based recovery and the independent audit. All three produced the identical eleven-patient conflict
  * set, which is the determinism claim holding in the running application rather than only in a test.
+ *
+ * About six of those seconds are the deliberate dwell between post-crash steps (`DEMO_STEP_DWELL_MS`). Before
+ * it existed the run took roughly twelve seconds, but the `CRASHED` state lasted under 250 ms and the panel
+ * explaining it was effectively invisible. Trading six seconds for a legible crash is the right way round.
  *
  * The number is a property of `backfillSpeed` and the record count, so it is stated as a range with the
  * conditions attached. Raising the speed shortens it and changes nothing else.
  */
 export const DEMO_DURATION = {
-  measuredSecondsMin: 11.5,
-  measuredSecondsMax: 12.5,
+  measuredSecondsMin: 18.7,
+  measuredSecondsMax: 18.9,
   measuredOnRecords: 1000,
   /** What the UI quotes. Rounded outward, so the demo cannot overrun its own stated budget. */
-  statedRange: 'about 12 seconds',
+  statedRange: 'about 19 seconds',
 } as const;
+
+/**
+ * How long each post-crash step is held on screen (R24.4).
+ *
+ * Without a pause the outage steps fire back to back and the `CRASHED` state lasts under 250 ms — measured
+ * live — so the dashboard panel explaining what a crash means never registers with a viewer. Four steps at
+ * this dwell add roughly six seconds to a twelve-second run, which is well inside a presentation budget and
+ * buys the demo its most important beat.
+ *
+ * Pacing only: this changes duration, never ordering, so the run stays reproducible.
+ */
+export const DEMO_STEP_DWELL_MS = 1600;
 
 export const DEMO_SCRIPT: DemoScript = {
   name: 'guarded-backfill-under-live-traffic',

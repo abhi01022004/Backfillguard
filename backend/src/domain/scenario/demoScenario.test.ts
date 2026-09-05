@@ -96,6 +96,7 @@ async function makeHarness(totalRecords: number, partitionCount = 5): Promise<Ha
     },
     // Unpaced: a manual clock cannot resolve a sleep, and pacing changes nothing about the outcome.
     tickDelayMs: 0,
+    stepDwellMs: 0,
   });
   orchestrator.register(scenarios);
 

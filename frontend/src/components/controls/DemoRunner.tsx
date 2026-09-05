@@ -121,23 +121,37 @@ export function DemoRunner({
           </h2>
           <p className="mt-1 text-sm text-slate-600">
             One click runs the whole argument end to end against live clinical traffic, in{' '}
-            <span className="font-medium">about 12 seconds</span> on the default 1,000-record dataset. Same seed,
+            <span className="font-medium">about 19 seconds</span> on the default 1,000-record dataset. Same seed,
             same run — every step fires on a record count, not a timer, so the numbers are reproducible rather
             than incidental.
           </p>
 
-          <ul className="mt-3 grid gap-x-5 gap-y-1 sm:grid-cols-2">
-            {GUARANTEES.map((claim) => (
-              <li key={claim} className="flex items-start gap-1.5 text-xs text-slate-600">
-                <Check className="mt-0.5 h-3 w-3 shrink-0 text-emerald-600" aria-hidden="true" />
-                {claim}
-              </li>
-            ))}
-          </ul>
-          <p className="mt-2 text-[11px] text-slate-500">
-            Each of those is asserted by the test suite on every build, at two dataset sizes — so a demo that
-            stopped demonstrating them would fail the build rather than fail live.
-          </p>
+          {/*
+           * Collapsed into a details element once a run has happened.
+           *
+           * The six claims are the reason to trust the button, so they are open on first load. After that the
+           * screen is better spent on what the run actually produced — and re-reading the promises while the
+           * evidence sits below them is the wrong order of attention.
+           */}
+          <details className="group mt-2.5" open={!scenario}>
+            <summary className="cursor-pointer list-none text-xs font-medium text-brand-800 hover:text-brand-900">
+              <span className="group-open:hidden">What this demo guarantees ▸</span>
+              <span className="hidden group-open:inline">What this demo guarantees ▾</span>
+            </summary>
+
+            <ul className="mt-2 grid gap-x-5 gap-y-1 sm:grid-cols-2">
+              {GUARANTEES.map((claim) => (
+                <li key={claim} className="flex items-start gap-1.5 text-xs text-slate-600">
+                  <Check className="mt-0.5 h-3 w-3 shrink-0 text-emerald-600" aria-hidden="true" />
+                  {claim}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 text-[11px] text-slate-500">
+              Each of those is asserted by the test suite on every build, at two dataset sizes — so a demo that
+              stopped demonstrating them would fail the build rather than fail live.
+            </p>
+          </details>
         </div>
 
         <div className="flex shrink-0 flex-col gap-2">

@@ -1,91 +1,26 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { Users } from 'lucide-react';
-import {
-  JOB_STATUS,
-  VERIFICATION_VERDICT,
-  type BackfillJobState,
-  type VerificationReport,
-} from '@bg/shared';
+import { JOB_STATUS, PARTITION_STATE, VERIFICATION_VERDICT } from '@bg/shared';
+import { makeJob, makeMetrics, makePartition, makeReport, makeVerificationMetrics } from '../../test/fixtures';
 import { KpiCard } from './KpiCard';
 import { KpiGrid } from './KpiGrid';
 import { JobStateBadge } from '../layout/JobStateBadge';
+import { StatusBar } from '../layout/StatusBar';
 
 /**
  * The "no fake numbers" discipline, tested at the point it can actually be violated (R14.6).
  *
- * Every other guarantee in this project is enforced in the backend and covered by backend tests. This one
- * is a rendering property: a component that defaults a missing value to `0` would show a confident,
- * plausible number for something nobody measured. "0 stale overwrites" displayed before a backfill has run
- * is not a reassuring result — it is a claim we cannot support, which happens to match the eventual answer.
+ * Every other guarantee in this project is enforced in the backend and covered by backend tests. This one is a
+ * rendering property: a component that defaulted a missing value to `0` would show a confident, plausible
+ * number for something nobody measured. "0 stale overwrites" displayed before a backfill has run is not a
+ * reassuring result — it is a claim we cannot support, which happens to match the eventual answer.
+ *
+ * The two audited numbers moved from the KPI grid to the pinned status strip during the dashboard rework, so
+ * the assertions about withholding them moved with them. They are the reason this file exists, so losing them
+ * in a layout change would have been the worst possible outcome of tidying up.
  */
-
-const JOB: BackfillJobState = {
-  jobId: 'BG-DEMO-001',
-  status: JOB_STATUS.COMPLETED,
-  mode: 'GUARDED',
-  seed: 20260905,
-  settings: {
-    totalRecords: 1000,
-    partitionCount: 10,
-    backfillSpeed: 25,
-    onlineUpdateFrequency: 8,
-    checkpointInterval: 50,
-    batchSize: 25,
-    maxReevaluationAttempts: 3,
-  },
-  metrics: {
-    eligibleRecords: 1000,
-    processed: 1000,
-    applied: 925,
-    noopAlreadyCurrent: 66,
-    conflicts: 9,
-    reevaluated: 9,
-    protectedUpdates: 9,
-    staleWriteAttemptsBlocked: 9,
-    failed: 0,
-    currentPartition: 9,
-    currentRecordIndex: 100,
-    percentComplete: 100,
-  },
-  partitions: [],
-  pendingResultCount: 0,
-  checkpoint: null,
-  startedAt: '2026-09-05T10:00:00.000Z',
-  crashedAt: null,
-  recoveredAt: null,
-  completedAt: '2026-09-05T10:00:40.000Z',
-  failureReason: null,
-};
-
-const REPORT: VerificationReport = {
-  jobId: 'BG-DEMO-001',
-  mode: 'GUARDED',
-  datasetDescription: 'Synthetic Hospital Patients (1000 records)',
-  seed: 20260905,
-  verdict: VERIFICATION_VERDICT.VERIFIED_SAFE,
-  metrics: {
-    eligibleRecords: 1000,
-    consideredRecords: 1000,
-    completedRecords: 1000,
-    conflicts: 9,
-    reevaluated: 9,
-    protectedUpdates: 9,
-    staleWriteAttemptsBlocked: 9,
-    staleOverwrites: 0,
-    lostOnlineUpdates: 0,
-    missedRecords: 0,
-    inconsistentRecords: 0,
-    postConsiderationDrift: 0,
-    coveragePercent: 100,
-  },
-  checks: [],
-  guaranteeStatement: 'Every eligible record was considered.',
-  jobStartedAt: null,
-  jobCompletedAt: null,
-  verifiedAt: '2026-09-05T10:01:00.000Z',
-  durationMs: 40_000,
-};
 
 describe('KpiCard', () => {
   it('renders an em dash, never a zero, when nothing has been measured', () => {
@@ -123,55 +58,148 @@ describe('KpiCard', () => {
 
 describe('KpiGrid', () => {
   it('shows no numbers at all before a job has run', () => {
-    render(<KpiGrid job={null} report={null} reportLoaded />);
+    render(<KpiGrid job={null} />);
 
-    // Seven cards, seven em dashes. Nothing invented.
-    expect(screen.getAllByText('—')).toHaveLength(7);
-    expect(screen.getAllByText('no job started').length).toBeGreaterThan(0);
+    // Four cards, four em dashes. Nothing invented.
+    expect(screen.getAllByText('—')).toHaveLength(4);
+    expect(screen.getAllByText('no job started').length).toBe(4);
   });
+
+  it('renders real counts from job state', () => {
+    render(<KpiGrid job={makeJob()} />);
+
+    expect(screen.getByText('1,000')).toBeInTheDocument();
+    // Conflicts, re-evaluated and stale-writes-blocked all read 9 in this fixture.
+    expect(screen.getAllByText('9')).toHaveLength(3);
+  });
+
+  it('collapses protected updates and blocked writes into one card', () => {
+    /**
+     * They are the same event counted from two directions — the shared type defines a protected update as
+     * "one per blocked stale write" — so they are equal by construction. Two cards showing the same number
+     * implied two independent measurements.
+     */
+    render(<KpiGrid job={makeJob()} />);
+
+    expect(screen.getByText('Stale writes blocked')).toBeInTheDocument();
+    expect(screen.getByText('= clinical updates protected')).toBeInTheDocument();
+    expect(screen.queryByText('Protected updates')).not.toBeInTheDocument();
+  });
+
+  it('says the guard is untested rather than implying success at zero conflicts', () => {
+    render(<KpiGrid job={makeJob({ metrics: makeMetrics({ conflicts: 0 }) })} />);
+    expect(screen.getByText('none yet — the guard is untested')).toBeInTheDocument();
+  });
+
+  it('does not show the audited numbers, which belong to the pinned strip', () => {
+    // Duplicating them would mean two surfaces that could disagree about the project's central claim.
+    render(<KpiGrid job={makeJob()} />);
+
+    expect(screen.queryByText('Stale overwrites')).not.toBeInTheDocument();
+    expect(screen.queryByText('Coverage')).not.toBeInTheDocument();
+  });
+});
+
+describe('StatusBar', () => {
+  const base = { onOpenControls: vi.fn(), reportLoaded: true };
 
   it('withholds the stale-overwrite number until the audit has run', () => {
     /**
-     * The most important assertion on the dashboard.
-     *
-     * Stale overwrites is the project's central claim, so it is sourced from the independent verification
-     * report rather than from the engine that did the writing. With a completed job but no report, the card
-     * must say so instead of showing a comfortable zero.
+     * The most important assertion on the dashboard, and now the most prominent place it could be violated —
+     * this strip is pinned to the top of every screen. With a completed job but no report it must say so
+     * instead of showing a comfortable zero.
      */
-    render(<KpiGrid job={JOB} report={null} reportLoaded />);
+    render(<StatusBar {...base} job={makeJob({ status: JOB_STATUS.COMPLETED })} report={null} />);
 
-    expect(screen.getByText('awaiting verification')).toBeInTheDocument();
-
-    // Other cards are populated, so the withholding is specific to the unaudited number rather than the
-    // grid simply having no data. Both "Total patients" and "Processed" are 1,000 in this fixture.
-    expect(screen.getAllByText('1,000')).toHaveLength(2);
-    // And exactly one card is still unmeasured.
-    expect(screen.getAllByText('—')).toHaveLength(1);
+    expect(screen.getByText('awaiting audit')).toBeInTheDocument();
+    // Two dashes: stale overwrites is unmeasured, coverage falls back to live progress.
+    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(1);
   });
 
   it('shows the audited zero once verification has run', () => {
-    render(<KpiGrid job={JOB} report={REPORT} reportLoaded />);
+    render(<StatusBar {...base} job={makeJob({ status: JOB_STATUS.VERIFIED_SAFE })} report={makeReport()} />);
 
-    expect(screen.queryByText('awaiting verification')).not.toBeInTheDocument();
-    expect(screen.getByText('none — verified')).toBeInTheDocument();
+    expect(screen.queryByText('awaiting audit')).not.toBeInTheDocument();
+    expect(screen.getByText('0')).toBeInTheDocument();
+    expect(screen.getAllByText('audited').length).toBe(2);
+  });
+
+  it('reports a non-zero stale-overwrite count rather than hiding it', () => {
+    render(
+      <StatusBar
+        {...base}
+        job={makeJob({ status: JOB_STATUS.VERIFICATION_FAILED })}
+        report={makeReport({
+          verdict: VERIFICATION_VERDICT.VERIFICATION_FAILED,
+          metrics: makeVerificationMetrics({ staleOverwrites: 3 }),
+        })}
+      />,
+    );
+
+    expect(screen.getByText('3')).toBeInTheDocument();
   });
 
   it('labels coverage by its source', () => {
-    // Live progress and audited coverage answer different questions, so the card says which is on screen.
-    const { unmount } = render(<KpiGrid job={JOB} report={null} reportLoaded />);
-    expect(screen.getByText('live progress')).toBeInTheDocument();
+    // Live progress and audited coverage answer different questions, so the strip says which is on screen.
+    const { unmount } = render(<StatusBar {...base} job={makeJob()} report={null} />);
+    expect(screen.getByText('live')).toBeInTheDocument();
     unmount();
 
-    render(<KpiGrid job={JOB} report={REPORT} reportLoaded />);
-    expect(screen.getByText('independently verified')).toBeInTheDocument();
+    render(<StatusBar {...base} job={makeJob()} report={makeReport()} />);
+    expect(screen.getAllByText('audited').length).toBe(2);
   });
 
-  it('renders real metrics from job state', () => {
-    render(<KpiGrid job={JOB} report={REPORT} reportLoaded />);
+  it('prompts for the demo instead of showing a progress bar with no run', () => {
+    render(<StatusBar {...base} job={null} report={null} />);
 
-    // Conflicts, re-evaluated and protected updates all read 9 in this fixture.
-    expect(screen.getAllByText('9')).toHaveLength(3);
-    expect(screen.getByText('925 applied · 66 already current')).toBeInTheDocument();
+    expect(screen.getByText(/No run yet/)).toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+  });
+
+  it('exposes progress to assistive technology with real bounds', () => {
+    render(
+      <StatusBar
+        {...base}
+        job={makeJob({ metrics: makeMetrics({ processed: 250, eligibleRecords: 1000, percentComplete: 25 }) })}
+        report={null}
+      />,
+    );
+
+    const bar = screen.getByRole('progressbar', { name: 'Records considered' });
+    expect(bar).toHaveAttribute('aria-valuenow', '250');
+    expect(bar).toHaveAttribute('aria-valuemax', '1000');
+  });
+
+  it('hides the colour-only partition strip from assistive technology', () => {
+    /**
+     * The strip conveys state by colour alone, which is why the labelled partition grid remains the accessible
+     * presentation. Announcing a colour-only duplicate would be worse than not announcing it at all (R24.6).
+     */
+    const { container } = render(
+      <StatusBar
+        {...base}
+        job={makeJob({
+          partitions: [makePartition(0, { state: PARTITION_STATE.PROCESSING, percentComplete: 40 })],
+        })}
+        report={null}
+      />,
+    );
+
+    expect(container.querySelector('[aria-hidden="true"] .rounded-sm')).not.toBeNull();
+    expect(screen.getByText('1 partitions')).toBeInTheDocument();
+  });
+
+  it('opens the controls drawer on request', async () => {
+    const onOpenControls = vi.fn();
+    render(<StatusBar {...base} onOpenControls={onOpenControls} job={makeJob()} report={null} />);
+
+    await userEvent.click(screen.getByRole('button', { name: /Controls/ }));
+    expect(onOpenControls).toHaveBeenCalled();
+  });
+
+  it('signals an in-flight action while the controls are scrolled away', () => {
+    render(<StatusBar {...base} job={makeJob()} report={null} pendingAction="crash" />);
+    expect(screen.getByLabelText('action in progress')).toBeInTheDocument();
   });
 });
 

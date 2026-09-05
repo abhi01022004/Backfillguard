@@ -314,11 +314,11 @@ npm run dev
 - Frontend — **http://localhost:5173**
 - Backend health — http://localhost:4000/api/health
 
-Then press **RUN DEMO**, above the fold on the dashboard. It takes **about 12 seconds** and runs the
+Then press **RUN DEMO**, above the fold on the dashboard. It takes **about 19 seconds** and runs the
 whole argument: start, two in-flight collisions, a crash mid-batch, a clinical update during the outage,
 checkpoint destruction, evidence-based recovery, and the independent audit.
 
-**Measured:** 12.3s, 11.9s and 11.6s on three consecutive runs of the default 1,000-record dataset. All three
+**Measured:** 18.9s, 18.9s and 18.7s on three consecutive runs of the default 1,000-record dataset. All three
 produced the identical eleven-patient conflict set — the dataset is regenerated from the seed and every random
 stream is reset at the start of a run, so a repeat is a genuine replay rather than a fresh run with the same
 settings.

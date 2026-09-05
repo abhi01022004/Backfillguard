@@ -1,4 +1,4 @@
-import { Database, Layers, Package, Save } from 'lucide-react';
+import { Activity, Database, Layers, Package, Save } from 'lucide-react';
 import type { BackfillJobState } from '@bg/shared';
 import { JobStateBadge } from '../layout/JobStateBadge';
 
@@ -13,6 +13,14 @@ import { JobStateBadge } from '../layout/JobStateBadge';
 
 export interface ProgressPanelProps {
   job: BackfillJobState | null;
+  /**
+   * Hides the bar and the headline count, for use alongside the pinned status strip.
+   *
+   * The strip shows `processed / eligible` with a bar. Rendering the same bar again a few hundred pixels below
+   * it looks unconsidered and wastes the space this panel should spend on detail the strip has no room for —
+   * how the processed records split between applied and already-current, and where the checkpoint is.
+   */
+  compact?: boolean;
 }
 
 function Stat({
@@ -38,7 +46,7 @@ function Stat({
   );
 }
 
-export function ProgressPanel({ job }: ProgressPanelProps) {
+export function ProgressPanel({ job, compact = false }: ProgressPanelProps) {
   return (
     <section
       aria-labelledby="progress-heading"
@@ -46,9 +54,11 @@ export function ProgressPanel({ job }: ProgressPanelProps) {
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 id="progress-heading" className="text-base font-semibold text-slate-900">
-          Backfill progress
+          {compact ? 'Run detail' : 'Backfill progress'}
         </h2>
-        <JobStateBadge status={job?.status ?? null} detail={job?.failureReason ?? null} />
+        {compact ? null : (
+          <JobStateBadge status={job?.status ?? null} detail={job?.failureReason ?? null} />
+        )}
       </div>
 
       {/* Metrics are null before a run and after a reset: no run means nothing measured. */}
@@ -58,7 +68,8 @@ export function ProgressPanel({ job }: ProgressPanelProps) {
         </p>
       ) : (
         <>
-          <div className="mt-4">
+          {/* Suppressed in compact mode: the pinned status strip already carries this exact bar and count. */}
+          <div className={compact ? 'hidden' : 'mt-4'}>
             <div className="flex items-baseline justify-between gap-3">
               <p className="text-sm text-slate-600">
                 <span className="text-lg font-semibold tabular-nums text-slate-900">
@@ -91,7 +102,19 @@ export function ProgressPanel({ job }: ProgressPanelProps) {
             </div>
           </div>
 
-          <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div
+            className={`grid gap-4 sm:grid-cols-2 lg:grid-cols-3 ${compact ? 'mt-3' : 'mt-5 lg:grid-cols-4'}`}
+          >
+            {/* Only shown in compact mode, where the status strip carries the total but not the split. */}
+            {compact ? (
+              <Stat
+                icon={Activity}
+                label="Outcomes"
+                value={`${job.metrics.applied.toLocaleString('en-GB')} applied`}
+                detail={`${job.metrics.noopAlreadyCurrent.toLocaleString('en-GB')} already current · ${job.metrics.reevaluated.toLocaleString('en-GB')} re-evaluated`}
+              />
+            ) : null}
+
             <Stat
               icon={Layers}
               label="Current partition"

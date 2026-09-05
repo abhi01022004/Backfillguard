@@ -111,6 +111,8 @@ async function makeHarness(
     // Slow enough that a demo is still running when the next request arrives, which is what the
     // "refuses a second demo" case needs to observe.
     tickDelayMs: options.tickDelayMs ?? 0,
+    // No dwell: these tests assert HTTP behaviour, not how watchable the demo is.
+    stepDwellMs: 0,
   });
 
   const app = createApp({

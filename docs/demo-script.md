@@ -26,9 +26,9 @@ Open **http://localhost:5173**. Check three things:
 Press **Reset simulation** if a previous run is on screen. The scripted demo resets on its own, so this is
 belt and braces.
 
-**Measured timing:** the scripted demo takes **11.6–12.3 seconds** end to end on the default 1,000-record
-dataset (three consecutive measured runs: 12.3s, 11.9s, 11.6s). All three produced the identical
-eleven-patient conflict set. Budget 15 seconds of silence and narrate over it.
+**Measured timing:** the scripted demo takes **18.7-18.9 seconds** end to end on the default 1,000-record
+dataset (three consecutive measured runs: 18.9s, 18.9s, 18.7s). All three produced the identical
+eleven-patient conflict set. Budget 20 seconds and narrate over it.
 
 ---
 
@@ -54,7 +54,7 @@ eleven-patient conflict set. Budget 15 seconds of silence and narrate over it.
 *Press **RUN DEMO**.*
 
 > "One click runs the whole thing: start the backfill, let clinical staff collide with it, crash it mid-batch,
-> destroy its checkpoint, recover, and audit the result. Twelve seconds. Every step fires on a record count,
+> destroy its checkpoint, recover, and audit the result. Nineteen seconds. Every step fires on a record count,
 > not a timer, so this run is reproducible — same seed, same conflicts, same numbers."
 
 ### 0:40 — 1:10 · Watch it run
@@ -226,7 +226,7 @@ settings, so quote your own screen — but these are representative.
 | Metric | Value |
 |---|---|
 | Records | 1,000 across 10 partitions |
-| Demo duration | 11.6 – 12.3 s |
+| Demo duration | 18.7 - 18.9 s |
 | Conflicts detected and re-evaluated | 11 |
 | Stale writes blocked | 11 |
 | **Stale overwrites** | **0** |
