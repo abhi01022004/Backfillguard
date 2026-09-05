@@ -13,6 +13,7 @@ import { InMemoryEventSink } from './infra/events/InMemoryEventSink';
 import { PrismaPatientRepository } from './infra/repositories/PrismaPatientRepository';
 import { PrismaJobRepository } from './infra/repositories/PrismaJobRepository';
 import { SimulationOrchestrator } from './domain/orchestrator/SimulationOrchestrator';
+import { OnlineUpdateSimulator } from './domain/online/OnlineUpdateSimulator';
 
 /**
  * Composition root.
@@ -32,19 +33,36 @@ async function start(): Promise<void> {
   const clock = createSystemClock();
   const events = new InMemoryEventSink(clock);
 
+  const rng = createRng(env.SIM_SEED);
+
   const orchestrator = new SimulationOrchestrator({
     patients: repository,
     jobs,
     events,
     clock,
-    rng: createRng(env.SIM_SEED),
+    rng,
     seed: env.SIM_SEED,
     settings: envSimulationSettings,
   });
 
+  /**
+   * A forked stream, so the simulator's draws cannot shift the dataset generator's output or vice
+   * versa. Without this, changing how many random values one concern consumes would silently alter the
+   * other, and "same seed, same run" would stop holding across unrelated code changes.
+   */
+  const onlineUpdates = new OnlineUpdateSimulator({
+    repository,
+    events,
+    rng: rng.fork('online-updates'),
+  });
+
+  onlineUpdates.configureAuto(envSimulationSettings.onlineUpdateFrequency);
+  orchestrator.register(onlineUpdates.asTickParticipant());
+
   const app = createApp({
     repository,
     orchestrator,
+    onlineUpdates,
     health: { probeDatabase: createDatabaseProbe(prisma) },
   });
 

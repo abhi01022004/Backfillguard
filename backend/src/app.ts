@@ -9,10 +9,13 @@ import { createHealthRouter, type HealthDeps } from './api/routes/health';
 import { createPatientRouter } from './api/routes/patients';
 import { createDatasetRouter } from './api/routes/dataset';
 import { createBackfillRouter } from './api/routes/backfill';
+import { createOnlineUpdateRouter } from './api/routes/onlineUpdate';
+import type { OnlineUpdateSimulator } from './domain/online/OnlineUpdateSimulator';
 
 export interface AppDeps {
   repository: PatientRepository;
   orchestrator: SimulationOrchestrator;
+  onlineUpdates: OnlineUpdateSimulator;
   health?: HealthDeps;
 }
 
@@ -48,6 +51,14 @@ export function createApp(deps: AppDeps): Express {
   app.use(
     '/api/backfill',
     createBackfillRouter({ orchestrator: deps.orchestrator, repository: deps.repository }),
+  );
+  app.use(
+    '/api/online-update',
+    createOnlineUpdateRouter({
+      simulator: deps.onlineUpdates,
+      orchestrator: deps.orchestrator,
+      repository: deps.repository,
+    }),
   );
   app.use(
     '/api',
