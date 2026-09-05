@@ -40,7 +40,8 @@ task.
 | C | Backfill engine, version control, conflict re-evaluation | Done |
 | C | Checkpoints, crash injection, evidence-based recovery | Done |
 | C | Independent verification engine | Done |
-| C | Naive backfill comparison | Next |
+| C | Naive backfill comparison | Done |
+| D | Real-time event stream and dashboard | Next |
 | D | Real-time event stream and dashboard | Planned |
 | E | One-click demo, naive comparison, verification report | Planned |
 | F | Test suite, security audit, polish, documentation | Planned |

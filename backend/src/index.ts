@@ -63,6 +63,7 @@ async function start(): Promise<void> {
     repository,
     orchestrator,
     onlineUpdates,
+    clock,
     health: { probeDatabase: createDatabaseProbe(prisma) },
   });
 

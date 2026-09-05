@@ -12,12 +12,15 @@ import { createBackfillRouter } from './api/routes/backfill';
 import { createOnlineUpdateRouter } from './api/routes/onlineUpdate';
 import { createCheckpointRouter } from './api/routes/checkpoint';
 import { createVerifyRouter } from './api/routes/verify';
+import { createCompareRouter } from './api/routes/compare';
+import type { Clock } from './lib/clock';
 import type { OnlineUpdateSimulator } from './domain/online/OnlineUpdateSimulator';
 
 export interface AppDeps {
   repository: PatientRepository;
   orchestrator: SimulationOrchestrator;
   onlineUpdates: OnlineUpdateSimulator;
+  clock: Clock;
   health?: HealthDeps;
 }
 
@@ -56,6 +59,7 @@ export function createApp(deps: AppDeps): Express {
   );
   app.use('/api/checkpoint', createCheckpointRouter({ orchestrator: deps.orchestrator }));
   app.use('/api/verify', createVerifyRouter({ orchestrator: deps.orchestrator }));
+  app.use('/api/compare', createCompareRouter({ clock: deps.clock }));
   app.use(
     '/api/online-update',
     createOnlineUpdateRouter({
