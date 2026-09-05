@@ -47,6 +47,16 @@ const envSchema = z.object({
 
   /** Max JSON body size. Bounded to keep the API from accepting arbitrary payloads (R22.8). */
   BODY_LIMIT: z.string().default('64kb'),
+
+  /**
+   * Which messaging provider handles risk notifications.
+   *
+   * Only `demo` is implemented, and it never contacts a network. Kept as configuration rather than a hard-coded
+   * constant because it is the seam a real provider would slot into — but deliberately *not* validated against an
+   * enum, so an unrecognised value degrades to demo with a warning instead of refusing to start. A typo here
+   * should not be able to stop the project running, and it must never result in a real send.
+   */
+  WHATSAPP_PROVIDER: z.string().default('demo'),
 });
 
 export type Env = z.infer<typeof envSchema>;

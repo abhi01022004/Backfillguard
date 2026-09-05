@@ -272,6 +272,33 @@ export class NotificationService {
     return this.deps.notifications.stats(jobId);
   }
 
+  /**
+   * Queued rows for one patient.
+   *
+   * Exposed so a caller can check whether a refusal has anything to cancel before doing the work of building a
+   * cancellation. Read-only, so it does not widen the service's write surface.
+   */
+  async queuedForPatient(jobId: string, patientId: number): Promise<NotificationRecord[]> {
+    return this.deps.notifications.queuedForPatient(jobId, patientId);
+  }
+
+  // ------------------------------------------------------------------ lifecycle
+
+  /**
+   * Clears one job's notifications.
+   *
+   * Routed through the service rather than letting callers reach the repository directly, so notification
+   * lifetime stays a single concern. Both of these are invoked from the same places the ledgers are cleared, which
+   * is what keeps alerts and evidence from outliving each other.
+   */
+  async clearForJob(jobId: string): Promise<void> {
+    await this.deps.notifications.clearForJob(jobId);
+  }
+
+  async clearAll(): Promise<void> {
+    await this.deps.notifications.clearAll();
+  }
+
   get providerName(): string {
     return this.deps.provider.name;
   }

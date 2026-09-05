@@ -16,6 +16,10 @@ import { LiveEventBroadcaster } from './infra/events/LiveEventBroadcaster';
 import { createLiveServer } from './infra/events/liveServer';
 import { PrismaPatientRepository } from './infra/repositories/PrismaPatientRepository';
 import { PrismaJobRepository } from './infra/repositories/PrismaJobRepository';
+import { PrismaNotificationRepository } from './infra/repositories/PrismaNotificationRepository';
+import { NotifyingPatientRepository } from './infra/repositories/NotifyingPatientRepository';
+import { NotificationService } from './domain/notification/NotificationService';
+import { selectWhatsAppProvider } from './infra/notification/selectWhatsAppProvider';
 import { SimulationOrchestrator } from './domain/orchestrator/SimulationOrchestrator';
 import { OnlineUpdateSimulator } from './domain/online/OnlineUpdateSimulator';
 import { ScenarioManager } from './domain/scenario/ScenarioManager';
@@ -33,8 +37,9 @@ async function start(): Promise<void> {
   const prisma = getPrismaClient();
   await applySqlitePragmas(prisma);
 
-  const repository = new PrismaPatientRepository(prisma);
+  const basePatients = new PrismaPatientRepository(prisma);
   const jobs = new PrismaJobRepository(prisma);
+  const notificationStore = new PrismaNotificationRepository(prisma);
 
   const clock = createSystemClock();
   const rng = createRng(env.SIM_SEED);
@@ -60,6 +65,25 @@ async function start(): Promise<void> {
   const httpServer = createServer();
   const io = createLiveServer({ httpServer, events: persistedSink, getJobState });
   const events = new LiveEventBroadcaster(persistedSink, { io, getJobState });
+
+  /**
+   * Risk notifications, assembled around the repository rather than inside the engines.
+   *
+   * `NotifyingPatientRepository` wraps the real store and observes guarded writes. Every safe commit in the system
+   * already funnels through `applyGuarded`, so wrapping the port covers the initial pass, conflict re-evaluation
+   * and both recovery paths at once — with no change to any engine, and with the naive comparison engine excluded
+   * automatically because it writes through the unguarded method instead.
+   *
+   * Wired only here. Tests and the comparison harness construct plain repositories, so they get no notification
+   * behaviour unless they explicitly ask for it.
+   */
+  const notifications = new NotificationService({
+    notifications: notificationStore,
+    provider: selectWhatsAppProvider(),
+    events,
+  });
+
+  const repository = new NotifyingPatientRepository(basePatients, notifications);
 
   const orchestrator = new SimulationOrchestrator({
     patients: repository,
