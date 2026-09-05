@@ -36,8 +36,8 @@ task.
 | Phase | Scope | State |
 |---|---|---|
 | A | Foundation: workspaces, shared contract, API skeleton, logging, errors | Done |
-| B | Database, synthetic dataset, repository adapters | Done (risk calculator next) |
-| C | Backfill engine, version control, checkpoints, crash, recovery, conflicts, verification | Planned |
+| B | Database, synthetic dataset, repository adapters, risk calculator | Done |
+| C | Backfill engine, version control, checkpoints, crash, recovery, conflicts, verification | Next |
 | D | Real-time event stream and dashboard | Planned |
 | E | One-click demo, naive comparison, verification report | Planned |
 | F | Test suite, security audit, polish, documentation | Planned |

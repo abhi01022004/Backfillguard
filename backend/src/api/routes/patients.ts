@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import type { BackfillStatus, Paginated, Patient, RiskLevel } from '@bg/shared';
+import { DISCLAIMER, type BackfillStatus, type Paginated, type Patient, type RiskLevel } from '@bg/shared';
 import type { PatientRepository } from '../../domain/ports/PatientRepository';
+import { calculateRiskScore, toRiskInput } from '../../domain/risk/riskCalculator';
 import { PatientNotFoundError } from '../../lib/errors';
 import { validate, validatedParams, validatedQuery } from '../middleware/validate';
 import {
@@ -59,8 +60,22 @@ export function createPatientRouter({ repository }: PatientRoutesDeps): Router {
         const patient = await repository.findByCode(code);
         if (!patient) throw new PatientNotFoundError(code);
 
-        // The risk breakdown and merged history are added in tasks 3 and 17 respectively.
-        res.json({ patient });
+        /**
+         * The breakdown is recomputed live from the row's *current* clinical values, not read back
+         * from storage. That makes it a useful diagnostic in its own right: if `patient.riskScore`
+         * disagrees with `risk.score`, the stored value was derived from data that has since changed
+         * — exactly the condition verification check C4 looks for, visible per patient.
+         */
+        const risk = calculateRiskScore(toRiskInput(patient));
+
+        // The merged version history arrives with task 17.
+        res.json({
+          patient,
+          risk,
+          disclaimer: DISCLAIMER.RISK_SCORE,
+          storedScoreMatchesCurrentData:
+            patient.riskScore === null ? null : patient.riskScore === risk.score,
+        });
       } catch (error) {
         next(error);
       }

@@ -281,6 +281,8 @@ satisfies and the tasks it depends on. Backend correctness (tasks 1–12) lands 
   - [ ] 19.2 Implement `ScenarioManager` with `beforeStep` / `afterStep` hooks driven by the orchestrator, named step progress, and abort support
     - _Requirements: R18.7, R18.8_
   - [ ] 19.3 Tune the scripted patient set so the run yields ≥1 online update, ≥1 conflict, ≥1 re-evaluation, exactly one checkpoint-loss episode, one recovery, `staleOverwrites == 0`, and 100% coverage — and so at least one re-evaluated patient changes `riskLevel`
+    - Contributions are **banded**, so an update only moves the score if it crosses a threshold (see `BAND_CROSSING_THRESHOLDS`). Note the spec's illustrative glucose 165 → 190 stays inside the `high` band and would change nothing; use a crossing such as 165 → 210
+    - For a MEDIUM → HIGH escalation the target must have blood pressure in the `normal` band: with BP `high`, age 60+ and any diagnosis weight the patient is already HIGH before the update
     - _Requirements: R18.4, R18.6_
   - [ ] 19.4 Add `POST /api/scenario/demo`, `POST /api/scenario/abort`, `GET /api/scenario/state`
     - _Requirements: R18.1_
