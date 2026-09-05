@@ -1,33 +1,87 @@
-import { Users } from 'lucide-react';
+import { useState } from 'react';
+import { DEFAULT_SIMULATION_SETTINGS, JOB_ACTION, whyNotAllowed, type SimulationSettings } from '@bg/shared';
 import { DISCLAIMER } from '@bg/shared';
 import { useLiveStream } from '../hooks/useLiveStream';
 import { useVerificationReport } from '../hooks/useVerificationReport';
 import { useConflicts } from '../hooks/useConflicts';
+import { useCheckpoint } from '../hooks/useCheckpoint';
+import { useScenario } from '../hooks/useScenario';
+import { useSimulationControls } from '../hooks/useSimulationControls';
 import { KpiGrid } from '../components/kpi/KpiGrid';
+import { DemoRunner } from '../components/controls/DemoRunner';
+import { ControlPanel } from '../components/controls/ControlPanel';
+import { SettingsForm } from '../components/controls/SettingsForm';
 import { ProgressPanel } from '../components/backfill/ProgressPanel';
 import { PartitionGrid } from '../components/backfill/PartitionGrid';
 import { RecoveryTimeline } from '../components/backfill/RecoveryTimeline';
 import { EventTimeline } from '../components/events/EventTimeline';
 import { ConflictList } from '../components/conflicts/ConflictList';
 import { ConnectionNotice } from '../components/layout/ConnectionNotice';
+import { navigate, ROUTES } from '../routes';
 
 /**
  * The main dashboard (R14).
  *
- * Everything here is bound to live server state. Sections that later tasks fill are announced as coming
- * rather than mocked up, because a placeholder that looks like a working feature is the same category of
- * dishonesty as a placeholder number.
+ * ## Layout order
+ *
+ * The demo runner is first, above the fold, because a judge with three minutes should not have to work out
+ * which of a dozen controls to press in what order (R18.6). Then the KPIs, then the controls, then the
+ * detail — headline claim, then the levers, then the evidence.
+ *
+ * Everything is bound to live server state. Nothing here holds an optimistic local copy: after a control
+ * fires, the resulting state arrives on the same stream every other viewer sees, so the projected screen and
+ * the presenter's laptop cannot disagree.
  */
 export function Dashboard() {
   const { status, job, events, resync } = useLiveStream();
   const { report, loaded: reportLoaded } = useVerificationReport(events);
   const conflicts = useConflicts(events);
+  const checkpoint = useCheckpoint(events);
+  const { scenario } = useScenario(events);
+  const controls = useSimulationControls();
+
+  /**
+   * Run settings live here rather than inside the form.
+   *
+   * Both the form's own start button and the control panel's need the same draft, and lifting it is the only
+   * way the two cannot disagree about what "start" would apply.
+   */
+  const [runSettings, setRunSettings] = useState<Partial<SimulationSettings>>({});
+
+  const settings = job?.settings ?? DEFAULT_SIMULATION_SETTINGS;
+  const startDisabledReason = whyNotAllowed(JOB_ACTION.START, job?.status ?? null);
 
   return (
     <div className="mx-auto max-w-[1600px] space-y-4 px-4 py-6 sm:px-6">
       <ConnectionNotice status={status} onRetry={resync} />
 
+      <DemoRunner
+        scenario={scenario}
+        controls={controls}
+        patientCount={job?.metrics?.eligibleRecords ?? null}
+      />
+
       <KpiGrid job={job} report={report} reportLoaded={reportLoaded} />
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <ControlPanel
+          job={job}
+          hasCheckpoint={checkpoint.hasCheckpoint}
+          controls={controls}
+          settings={runSettings}
+        />
+        <SettingsForm
+          current={settings}
+          status={job?.status ?? null}
+          busy={controls.pending !== null}
+          startDisabledReason={startDisabledReason}
+          onStart={(next) => {
+            setRunSettings(next);
+            void controls.start(next);
+          }}
+          onReseed={(options) => void controls.reseed(options)}
+        />
+      </div>
 
       {/* Two columns on wide screens, stacking to one on narrow (R14.7). */}
       <div className="grid gap-4 xl:grid-cols-3">
@@ -55,33 +109,12 @@ export function Dashboard() {
             open={conflicts.open}
             loading={conflicts.loading}
             error={conflicts.error}
+            // Deep-links to the patient browser. The drawer opens there rather than here, so a record's full
+            // history is presented in exactly one place.
+            onSelectPatient={(code) => navigate(ROUTES.patients, { code })}
           />
         </div>
       </div>
-
-      <section
-        aria-labelledby="pending-heading"
-        className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 p-5"
-      >
-        <h2 id="pending-heading" className="text-sm font-semibold text-slate-700">
-          Still to come
-        </h2>
-        <p className="mt-1 text-xs text-slate-500">
-          Not built yet, so listed rather than mocked up — nothing on this page should look like a working
-          feature that is not.
-        </p>
-        <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-          <li className="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-white p-3">
-            <Users className="mt-0.5 h-4 w-4 shrink-0 text-slate-300" aria-hidden="true" />
-            <div>
-              <p className="text-xs font-medium text-slate-700">Patients and simulation controls</p>
-              <p className="mt-0.5 text-xs text-slate-500">
-                Patient records with version history, and the run controls
-              </p>
-            </div>
-          </li>
-        </ul>
-      </section>
 
       <p className="pb-2 text-center text-xs text-slate-400">{DISCLAIMER.LONG}</p>
     </div>

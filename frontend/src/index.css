@@ -40,3 +40,56 @@
     @apply outline-none ring-2 ring-brand-500 ring-offset-2 ring-offset-slate-50;
   }
 }
+
+/**
+ * Print stylesheet for the verification report (R20.5).
+ *
+ * The requirement is an exportable report, and a browser's own print-to-PDF is the right mechanism: correct
+ * fonts, correct pagination, selectable text, and no dependency. The alternatives were both worse — bundling a
+ * PDF library means a second rendering path to keep in step with the on-screen one, and generating server-side
+ * with a headless browser means shipping a browser to render a page a browser is already displaying.
+ *
+ * What this needs to do is strip the application chrome and force backgrounds to survive, because the verdict
+ * banner's colour is load-bearing. Interactive controls are hidden individually via `print:hidden`.
+ */
+@media print {
+  /* Colour-printing hint: without it most browsers drop background fills and the verdict banner prints blank. */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body {
+    background: white;
+  }
+
+  /* Navigation, health polling indicators and the sticky header are all screen furniture. */
+  header,
+  nav[aria-label='Primary'] {
+    display: none !important;
+  }
+
+  main {
+    padding: 0 !important;
+  }
+
+  /* Shadows and rings render as muddy grey boxes on paper; borders carry the same structure. */
+  .shadow-sm,
+  .shadow-xl {
+    box-shadow: none !important;
+  }
+
+  /* Keep a check or a metric table from splitting across a page break mid-sentence. */
+  section,
+  li,
+  table {
+    break-inside: avoid;
+  }
+
+  /* Internally scrolling panels must print in full rather than clipped to their on-screen height. */
+  .overflow-y-auto,
+  .overflow-x-auto {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+}
