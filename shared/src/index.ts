@@ -15,3 +15,4 @@ export * from './events';
 export * from './verification';
 export * from './api';
 export * from './jobActions';
+export * from './notification';

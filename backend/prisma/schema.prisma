@@ -63,6 +63,7 @@ model Patient {
   conflicts      Conflict[]
   onlineUpdates  OnlineUpdate[]
   pendingResults PendingResult[]
+  notifications  Notification[]
 
   // Partition-ordered scans are the engine's primary access pattern.
   @@index([partitionIndex, id])
@@ -313,4 +314,66 @@ model EventLog {
 
   @@index([sequence])
   @@index([type])
+}
+
+/// A simulated outbound risk alert.
+///
+/// ⚠ Nothing in this table represents a transmitted message. The default provider is a local simulator,
+/// `recipient` is derived from the patient id rather than stored contact detail, and every `message`
+/// body carries the synthetic-data disclaimer.
+///
+/// ## Why `patientVersion` is the important column
+///
+/// It records which state of the record the alert describes. On a SENT row it is the version the
+/// guarded write committed against, so the alert can be checked against the data rather than trusted.
+/// On a CANCELLED row it is the stale version that was refused — which is what makes a prevented alert
+/// visible evidence rather than an absence.
+///
+/// ## Why `idempotencyKey` is unique
+///
+/// `jobId:patientId:version:riskLevel`. Recovery deliberately revisits records it cannot account for,
+/// so one patient can be committed twice in a single job. Enforcing uniqueness here makes duplicate
+/// suppression a storage guarantee rather than a check that has to remember to run — the same reasoning
+/// as ConsiderationLedger's composite key.
+model Notification {
+  id Int @id @default(autoincrement())
+
+  jobId       String
+  patientId   Int
+  patientCode String
+
+  /// Source version the risk result was derived from.
+  patientVersion Int
+
+  riskScore Int
+  riskLevel String
+
+  channel String
+  status  String
+
+  /// Full rendered body, including the mandatory disclaimer.
+  message String
+  /// Synthetic destination derived from the patient id. Never a real number.
+  recipient String
+
+  /// Provider-assigned id. Null until sent. Demo ids are prefixed `DEMO-WA-`.
+  providerMessageId String?
+
+  reason String
+
+  /// Deterministic deduplication key; see the model docblock.
+  idempotencyKey String @unique
+
+  createdAt   DateTime  @default(now())
+  sentAt      DateTime?
+  cancelledAt DateTime?
+
+  /// Present only on a FAILED row.
+  failureReason String?
+
+  patient Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, status])
+  @@index([patientId])
+  @@index([status])
 }

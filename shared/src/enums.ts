@@ -219,6 +219,18 @@ export const EVENT_TYPE = {
   SCENARIO_ABORTED: 'SCENARIO_ABORTED',
   DATASET_SEEDED: 'DATASET_SEEDED',
   SIMULATION_RESET: 'SIMULATION_RESET',
+
+  /**
+   * --- risk notifications ---
+   *
+   * Added to the existing event vocabulary rather than given their own channel, so notifications appear in the
+   * same timeline as the conflict that caused them. That interleaving is the point: a viewer should be able to
+   * read "stale result rejected → re-evaluated → notification sent" as one sequence.
+   */
+  NOTIFICATION_QUEUED: 'NOTIFICATION_QUEUED',
+  NOTIFICATION_SENT: 'NOTIFICATION_SENT',
+  NOTIFICATION_CANCELLED: 'NOTIFICATION_CANCELLED',
+  NOTIFICATION_FAILED: 'NOTIFICATION_FAILED',
 } as const;
 export type EventType = (typeof EVENT_TYPE)[keyof typeof EVENT_TYPE];
 
@@ -254,6 +266,18 @@ export const SIGNIFICANT_EVENT_TYPES: readonly EventType[] = [
   EVENT_TYPE.SCENARIO_ABORTED,
   EVENT_TYPE.DATASET_SEEDED,
   EVENT_TYPE.SIMULATION_RESET,
+  /**
+   * Notification events are narrative, not telemetry.
+   *
+   * `NOTIFICATION_QUEUED` is the one judgement call here: it fires once per staged HIGH result, so on a
+   * contended run it is more frequent than the others. It stays significant anyway, because a queued alert
+   * that is later cancelled is exactly the pair a viewer needs to see uncoalesced — the cancellation only
+   * means anything if you witnessed the queueing.
+   */
+  EVENT_TYPE.NOTIFICATION_QUEUED,
+  EVENT_TYPE.NOTIFICATION_SENT,
+  EVENT_TYPE.NOTIFICATION_CANCELLED,
+  EVENT_TYPE.NOTIFICATION_FAILED,
 ];
 
 export function isSignificantEvent(type: EventType): boolean {
