@@ -136,7 +136,7 @@ export function EventTimeline({ events, limit = TRANSPORT.timelineWindow }: Even
         </h2>
 
         <div className="flex items-center gap-1.5">
-          <ListFilter className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
+          <ListFilter className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
           <label htmlFor="event-filter" className="sr-only">
             Filter events by severity
           </label>
@@ -189,7 +189,7 @@ export function EventTimeline({ events, limit = TRANSPORT.timelineWindow }: Even
                 className={`flex gap-2.5 border-l-4 px-4 py-2.5 ${presentation.row}`}
               >
                 <Icon
-                  className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-400"
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500"
                   aria-hidden="true"
                 />
                 <div className="min-w-0 flex-1">
@@ -205,7 +205,7 @@ export function EventTimeline({ events, limit = TRANSPORT.timelineWindow }: Even
                       </span>
                     ) : null}
                     <time
-                      className="ml-auto font-mono text-[10px] tabular-nums text-slate-400"
+                      className="ml-auto font-mono text-[10px] tabular-nums text-slate-500"
                       dateTime={event.createdAt}
                     >
                       {formatTime(event.createdAt)}

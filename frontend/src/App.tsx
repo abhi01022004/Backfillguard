@@ -22,6 +22,20 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      {/**
+       * Skip link (R24.6).
+       *
+       * The banner, header and nav sit ahead of the content, so a keyboard user would otherwise tab through
+       * roughly a dozen controls on every page change before reaching anything they came for. Hidden until
+       * focused, so it costs nothing visually and appears exactly when it is useful.
+       */}
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:bg-brand-700 focus:px-3 focus:py-2 focus:text-sm focus:font-medium focus:text-white"
+      >
+        Skip to page content
+      </a>
+
       <DisclaimerBanner />
       <Header />
       <Nav current={route} />

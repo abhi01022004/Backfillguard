@@ -120,7 +120,7 @@ export function VersionHistory({ history }: VersionHistoryProps) {
                 v{entry.version}
               </span>
               <time
-                className="ml-auto font-mono text-[10px] tabular-nums text-slate-400"
+                className="ml-auto font-mono text-[10px] tabular-nums text-slate-500"
                 dateTime={entry.at}
               >
                 {formatTimestamp(entry.at)}

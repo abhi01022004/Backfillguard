@@ -19,13 +19,13 @@ export type ControlTone = 'primary' | 'neutral' | 'warning' | 'danger';
 
 const TONE_CLASS: Record<ControlTone, string> = {
   primary:
-    'bg-brand-600 text-white ring-brand-600 hover:enabled:bg-brand-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:ring-slate-200',
+    'bg-brand-600 text-white ring-brand-600 hover:enabled:bg-brand-700 disabled:bg-slate-200 disabled:text-slate-500 disabled:ring-slate-200',
   neutral:
-    'bg-white text-slate-700 ring-slate-300 hover:enabled:bg-slate-50 disabled:bg-slate-50 disabled:text-slate-400',
+    'bg-white text-slate-700 ring-slate-300 hover:enabled:bg-slate-50 disabled:bg-slate-50 disabled:text-slate-500',
   warning:
-    'bg-amber-50 text-amber-900 ring-amber-300 hover:enabled:bg-amber-100 disabled:bg-slate-50 disabled:text-slate-400 disabled:ring-slate-200',
+    'bg-amber-50 text-amber-900 ring-amber-300 hover:enabled:bg-amber-100 disabled:bg-slate-50 disabled:text-slate-500 disabled:ring-slate-200',
   danger:
-    'bg-rose-50 text-rose-900 ring-rose-300 hover:enabled:bg-rose-100 disabled:bg-slate-50 disabled:text-slate-400 disabled:ring-slate-200',
+    'bg-rose-50 text-rose-900 ring-rose-300 hover:enabled:bg-rose-100 disabled:bg-slate-50 disabled:text-slate-500 disabled:ring-slate-200',
 };
 
 export interface ControlButtonProps {

@@ -19,6 +19,7 @@ import { PrismaJobRepository } from './infra/repositories/PrismaJobRepository';
 import { SimulationOrchestrator } from './domain/orchestrator/SimulationOrchestrator';
 import { OnlineUpdateSimulator } from './domain/online/OnlineUpdateSimulator';
 import { ScenarioManager } from './domain/scenario/ScenarioManager';
+import { reseedToBaseline } from './infra/seed/seedRunner';
 
 /**
  * Composition root.
@@ -97,6 +98,16 @@ async function start(): Promise<void> {
     repository,
     events,
     clock,
+    /**
+     * Restores the dataset to its generated baseline before each demo run.
+     *
+     * Wired here rather than inside the manager because regenerating patients is an infrastructure concern.
+     * Without it a repeated demo starts from data the previous run mutated, so it is a different run with the
+     * same configuration rather than the same run again — and the demo makes the stronger claim on screen.
+     */
+    prepareDataset: async () => {
+      await reseedToBaseline(repository, env.SIM_SEED);
+    },
   });
   orchestrator.register(scenarios);
 

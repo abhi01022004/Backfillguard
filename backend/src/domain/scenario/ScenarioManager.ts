@@ -59,6 +59,14 @@ export interface ScenarioManagerDeps {
   events: EventSink;
   clock: Clock;
   /**
+   * Restores the dataset to its generated baseline before a run.
+   *
+   * Injected as a callback rather than called directly, because regenerating patients is an infrastructure
+   * concern and the domain must not import the generator. Optional: without it the demo still runs correctly,
+   * it simply is not a byte-for-byte replay of the previous one.
+   */
+  prepareDataset?: () => Promise<void>;
+  /**
    * Milliseconds to wait between ticks. Defaults to the script's speed.
    *
    * Zero drives the run as fast as it will go, which is what the test suite uses: a manual clock has
@@ -280,6 +288,16 @@ export class ScenarioManager implements TickParticipant {
        * coverage would then be measured against a set that includes records this run never touched.
        */
       await this.deps.orchestrator.reset();
+
+      /**
+       * Restore the dataset before clearing state, in that order.
+       *
+       * Regenerating the patients is what makes a repeated demo a genuine replay: `clearSimulationState` alone
+       * keeps each record's version and clinical values, so a second run would start from data the first run
+       * mutated. `clearSimulationState` still runs afterwards to drop the ledgers, which the regeneration does
+       * not own.
+       */
+      await this.deps.prepareDataset?.();
       await this.deps.repository.clearSimulationState();
 
       await this.executeByTrigger(DEMO_TRIGGER.IMMEDIATE);

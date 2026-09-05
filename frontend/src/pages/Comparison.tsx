@@ -17,7 +17,7 @@ export function Comparison() {
   return (
     <div className="mx-auto max-w-[1400px] space-y-4 px-4 py-6 sm:px-6">
       <ComparisonView state={state} scenario={scenario} onScenarioChange={setScenario} />
-      <p className="pb-2 text-center text-xs text-slate-400">{DISCLAIMER.LONG}</p>
+      <p className="pb-2 text-center text-xs text-slate-500">{DISCLAIMER.LONG}</p>
     </div>
   );
 }

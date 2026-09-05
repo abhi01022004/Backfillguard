@@ -15,6 +15,7 @@ import { InMemoryEventSink } from '../../infra/events/InMemoryEventSink';
 import { InMemoryJobRepository } from '../../infra/repositories/InMemoryJobRepository';
 import { InMemoryPatientRepository } from '../../infra/repositories/InMemoryPatientRepository';
 import { generatePatients } from '../../infra/seed/patientGenerator';
+import { reseedToBaseline } from '../../infra/seed/seedRunner';
 import { OnlineUpdateSimulator } from '../online/OnlineUpdateSimulator';
 import { SimulationOrchestrator } from '../orchestrator/SimulationOrchestrator';
 import { calculateRiskScore, toRiskInput } from '../risk/riskCalculator';
@@ -88,6 +89,11 @@ async function makeHarness(totalRecords: number, partitionCount = 5): Promise<Ha
     repository: patients,
     events,
     clock,
+    // Matches the running application: each run starts from the generated baseline, which is what makes a
+    // repeated demo a replay rather than a fresh run over mutated data.
+    prepareDataset: async () => {
+      await reseedToBaseline(patients, DEFAULT_SEED);
+    },
     // Unpaced: a manual clock cannot resolve a sleep, and pacing changes nothing about the outcome.
     tickDelayMs: 0,
   });
@@ -361,18 +367,30 @@ describe('ScenarioManager: the scripted demo', () => {
     const second = await makeHarness(300);
     await second.scenarios.run();
 
-    const summarise = async (harness: Harness) => {
-      const conflicts = await harness.patients.listConflicts(JOB);
-      const report = harness.orchestrator.getLastReport()!;
-
-      return {
-        conflictCodes: conflicts.map((conflict) => conflict.patientCode),
-        conflictScores: conflicts.map((conflict) => `${conflict.oldScore}->${conflict.newScore}`),
-        metrics: report.metrics,
-      };
-    };
-
     expect(await summarise(second)).toEqual(await summarise(first));
+  });
+
+  it('produces an identical run when repeated in the same process', async () => {
+    /**
+     * The harder half of the determinism claim, and the one that was actually broken.
+     *
+     * Two fresh harnesses each get a fresh generator, so the case above passes even when a repeated run does
+     * not replay. A long-lived server reuses one generator across runs, so the second run continued from
+     * wherever the first left the stream. Measured live on the 1,000-record dataset: four consecutive demo runs
+     * reported 6, 8, 7 and 7 conflicts. All four were safe — but the demo puts "same seed, same run" on screen,
+     * and a judge who pressed the button twice had every reason to disbelieve it.
+     */
+    const harness = await makeHarness(300);
+
+    await harness.scenarios.run();
+    const first = await summarise(harness);
+
+    await harness.scenarios.run();
+    const second = await summarise(harness);
+
+    expect(second.conflictCodes).toEqual(first.conflictCodes);
+    expect(second.conflictScores).toEqual(first.conflictScores);
+    expect(second.metrics).toEqual(first.metrics);
   });
 
   it('refuses to start a second run while one is in progress', async () => {
@@ -406,6 +424,18 @@ describe('ScenarioManager: the scripted demo', () => {
     expect(second.metrics.staleOverwrites).toBe(0);
   });
 });
+
+/** The observable shape of a run, for comparing two of them. */
+async function summarise(harness: Harness) {
+  const conflicts = await harness.patients.listConflicts(JOB);
+  const report = harness.orchestrator.getLastReport()!;
+
+  return {
+    conflictCodes: conflicts.map((conflict) => conflict.patientCode),
+    conflictScores: conflicts.map((conflict) => `${conflict.oldScore}->${conflict.newScore}`),
+    metrics: report.metrics,
+  };
+}
 
 /** Local level banding, so the test does not depend on the engine's own classification helper. */
 function levelOf(score: number): 'LOW' | 'MEDIUM' | 'HIGH' {

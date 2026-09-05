@@ -153,12 +153,12 @@ export function StaleOverwriteCallout({ spotlight }: StaleOverwriteCalloutProps)
       <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-4 py-3 text-sm">
         <span className="text-slate-500">{spotlight.field}:</span>
         <span className="font-mono text-slate-500">{String(spotlight.originalValue)}</span>
-        <ArrowRight className="h-3.5 w-3.5 text-slate-400" aria-hidden="true" />
+        <ArrowRight className="h-3.5 w-3.5 text-slate-500" aria-hidden="true" />
         <span className="font-mono font-semibold text-slate-900">
           {String(spotlight.onlineUpdatedValue)}
         </span>
         <span className="text-xs text-slate-500">(clinician)</span>
-        <span className="mx-2 text-slate-300" aria-hidden="true">
+        <span className="mx-2 text-slate-500" aria-hidden="true">
           │
         </span>
         <span className="text-slate-500">naive ends at</span>
@@ -167,7 +167,7 @@ export function StaleOverwriteCallout({ spotlight }: StaleOverwriteCalloutProps)
         >
           {String(spotlight.naive.finalValue)}
         </span>
-        <span className="mx-2 text-slate-300" aria-hidden="true">
+        <span className="mx-2 text-slate-500" aria-hidden="true">
           │
         </span>
         <span className="text-slate-500">guarded ends at</span>

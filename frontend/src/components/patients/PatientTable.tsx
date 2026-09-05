@@ -43,7 +43,7 @@ function VersionPair({ patient }: { patient: Patient }) {
 
   if (scored === null) {
     return (
-      <span className="font-mono text-xs tabular-nums text-slate-400" title="Never scored">
+      <span className="font-mono text-xs tabular-nums text-slate-500" title="Never scored">
         v{current} / —
       </span>
     );
@@ -96,7 +96,7 @@ export function PatientTable({
           <div className="flex items-center gap-2">
             {state.fetchedAt ? (
               // Staleness made visible: the list refreshes on run lifecycle events, not per record write.
-              <span className="text-[11px] text-slate-400">
+              <span className="text-[11px] text-slate-500">
                 loaded {new Date(state.fetchedAt).toLocaleTimeString('en-GB', { hour12: false })}
               </span>
             ) : null}
@@ -125,7 +125,7 @@ export function PatientTable({
             </label>
             <div className="relative mt-0.5">
               <Search
-                className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
+                className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500"
                 aria-hidden="true"
               />
               <input

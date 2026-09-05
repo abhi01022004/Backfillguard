@@ -8,6 +8,7 @@ import { useCheckpoint } from '../hooks/useCheckpoint';
 import { useScenario } from '../hooks/useScenario';
 import { useSimulationControls } from '../hooks/useSimulationControls';
 import { KpiGrid } from '../components/kpi/KpiGrid';
+import { VerdictSummary } from '../components/report/VerdictSummary';
 import { DemoRunner } from '../components/controls/DemoRunner';
 import { ControlPanel } from '../components/controls/ControlPanel';
 import { SettingsForm } from '../components/controls/SettingsForm';
@@ -61,6 +62,9 @@ export function Dashboard() {
         patientCount={job?.metrics?.eligibleRecords ?? null}
         scenarioError={scenarioError}
       />
+
+      {/* The final proof, on the dashboard, so it needs no navigation to reach (R24.1). */}
+      <VerdictSummary report={report} loaded={reportLoaded} />
 
       <KpiGrid job={job} report={report} reportLoaded={reportLoaded} />
 
@@ -118,7 +122,7 @@ export function Dashboard() {
         </div>
       </div>
 
-      <p className="pb-2 text-center text-xs text-slate-400">{DISCLAIMER.LONG}</p>
+      <p className="pb-2 text-center text-xs text-slate-500">{DISCLAIMER.LONG}</p>
     </div>
   );
 }

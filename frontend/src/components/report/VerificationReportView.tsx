@@ -105,7 +105,7 @@ function CheckRow({ check }: { check: VerificationCheckResult }) {
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2">
             <h4 className="text-sm font-semibold text-slate-900">{check.title}</h4>
-            <span className="font-mono text-[10px] text-slate-400">{check.id}</span>
+            <span className="font-mono text-[10px] text-slate-500">{check.id}</span>
             {/* Outcome as a word, not only as an icon and a colour. */}
             <span
               className={`ml-auto text-[11px] font-bold uppercase ${
@@ -170,7 +170,7 @@ function MetricTable({
                 <th scope="row" className="py-2 pr-3 font-normal align-top">
                   <span className="text-slate-700">{row.label}</span>
                   {row.mustBe !== undefined ? (
-                    <span className="ml-1.5 font-mono text-[10px] text-slate-400">
+                    <span className="ml-1.5 font-mono text-[10px] text-slate-500">
                       must be {row.mustBe}
                     </span>
                   ) : null}
@@ -408,7 +408,7 @@ export function VerificationReportView({
             </div>
           </section>
 
-          <p className="pb-2 text-xs leading-relaxed text-slate-400">{DISCLAIMER.LONG}</p>
+          <p className="pb-2 text-xs leading-relaxed text-slate-500">{DISCLAIMER.LONG}</p>
         </>
       )}
     </div>

@@ -41,10 +41,10 @@ const STEP_ICON: Record<ScenarioStepState['status'], typeof CircleDot> = {
 };
 
 const STEP_CLASS: Record<ScenarioStepState['status'], string> = {
-  PENDING: 'text-slate-400',
+  PENDING: 'text-slate-500',
   ACTIVE: 'text-brand-700',
   DONE: 'text-emerald-700',
-  SKIPPED: 'text-slate-400',
+  SKIPPED: 'text-slate-500',
 };
 
 function StepRow({ step }: { step: ScenarioStepState }) {
@@ -71,12 +71,12 @@ function StepRow({ step }: { step: ScenarioStepState }) {
           {step.name}
           {/* The record count this step fires at: the basis of the determinism claim (R18.3). */}
           {step.atProcessed !== null ? (
-            <span className="ml-1.5 font-mono text-[10px] font-normal text-slate-400 tabular-nums">
+            <span className="ml-1.5 font-mono text-[10px] font-normal text-slate-500 tabular-nums">
               at {step.atProcessed} records read
             </span>
           ) : null}
           {/* Status as text, not colour alone. */}
-          <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-slate-400">
+          <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-slate-500">
             {step.status.toLowerCase()}
           </span>
         </p>
@@ -120,9 +120,10 @@ export function DemoRunner({
             Run the winning demo
           </h2>
           <p className="mt-1 text-sm text-slate-600">
-            One click runs the whole argument end to end against live clinical traffic. Same seed, same run —
-            every step fires on a record count, not a timer, so the numbers are reproducible rather than
-            incidental.
+            One click runs the whole argument end to end against live clinical traffic, in{' '}
+            <span className="font-medium">about 12 seconds</span> on the default 1,000-record dataset. Same seed,
+            same run — every step fires on a record count, not a timer, so the numbers are reproducible rather
+            than incidental.
           </p>
 
           <ul className="mt-3 grid gap-x-5 gap-y-1 sm:grid-cols-2">

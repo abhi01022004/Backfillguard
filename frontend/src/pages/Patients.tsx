@@ -63,7 +63,7 @@ export function Patients() {
         onRefresh={detail.refetch}
       />
 
-      <p className="pb-2 text-center text-xs text-slate-400">{DISCLAIMER.LONG}</p>
+      <p className="pb-2 text-center text-xs text-slate-500">{DISCLAIMER.LONG}</p>
     </div>
   );
 }

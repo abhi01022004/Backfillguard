@@ -69,7 +69,43 @@ describe('createRng', () => {
     }
   });
 
-  describe('fork', () => {
+  describe('reset', () => {
+  it('returns the stream to its seeded start', () => {
+    /**
+     * The property a long-lived server needs. Without it a second run continues from wherever the first left
+     * the stream, so "same seed, same run" holds only for a fresh process — and four consecutive live demo runs
+     * measured 6, 8, 7 and 7 conflicts.
+     */
+    const rng = createRng(1234);
+    const first = [rng.next(), rng.next(), rng.next()];
+
+    rng.reset();
+    expect([rng.next(), rng.next(), rng.next()]).toEqual(first);
+  });
+
+  it('resets every fork it handed out, not just the root', () => {
+    const rng = createRng(1234);
+    const child = rng.fork('online-updates');
+
+    const rootFirst = [rng.next(), rng.next()];
+    const childFirst = [child.next(), child.next()];
+
+    rng.reset();
+
+    expect([rng.next(), rng.next()]).toEqual(rootFirst);
+    // A child left advanced would keep producing different values, which is exactly the bug.
+    expect([child.next(), child.next()]).toEqual(childFirst);
+  });
+
+  it('returns the same generator for a repeated fork label', () => {
+    // Two generators from one label would produce identical sequences while looking independent.
+    const rng = createRng(99);
+    expect(rng.fork('a')).toBe(rng.fork('a'));
+    expect(rng.fork('a')).not.toBe(rng.fork('b'));
+  });
+});
+
+describe('fork', () => {
     it('gives an independent, reproducible stream per label', () => {
       const first = createRng(100).fork('patients');
       const second = createRng(100).fork('patients');

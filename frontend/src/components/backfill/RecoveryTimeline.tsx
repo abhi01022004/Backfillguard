@@ -138,7 +138,7 @@ export function RecoveryTimeline({ job, events }: RecoveryTimelineProps) {
               ? beat.tone === 'alarm'
                 ? 'bg-rose-100 text-rose-700 ring-rose-300'
                 : 'bg-emerald-100 text-emerald-700 ring-emerald-300'
-              : 'bg-slate-100 text-slate-300 ring-slate-200';
+              : 'bg-slate-100 text-slate-500 ring-slate-200';
 
             return (
               <li key={beat.key} className="relative flex gap-3 pb-5 last:pb-0">
@@ -165,13 +165,13 @@ export function RecoveryTimeline({ job, events }: RecoveryTimelineProps) {
                 <div className="min-w-0 pt-0.5">
                   <p
                     className={`text-sm font-medium ${
-                      beat.reached ? 'text-slate-900' : 'text-slate-400'
+                      beat.reached ? 'text-slate-900' : 'text-slate-500'
                     }`}
                   >
                     {beat.label}
                     {/* Never state alone by colour or position. */}
                     {!beat.reached ? (
-                      <span className="ml-2 text-xs font-normal italic text-slate-400">
+                      <span className="ml-2 text-xs font-normal italic text-slate-500">
                         not yet
                       </span>
                     ) : null}

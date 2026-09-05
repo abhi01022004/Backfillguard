@@ -71,7 +71,7 @@ function NumberField({
         />
         {bound.unit ? <span className="text-[11px] text-slate-500">{bound.unit}</span> : null}
       </div>
-      <p id={`${id}-range`} className="mt-0.5 text-[10px] text-slate-400 tabular-nums">
+      <p id={`${id}-range`} className="mt-0.5 text-[10px] text-slate-500 tabular-nums">
         {bound.min}–{bound.max}
       </p>
     </div>
@@ -115,7 +115,7 @@ export function SettingsForm({
           id="settings-heading"
           className="flex items-center gap-2 text-base font-semibold text-slate-900"
         >
-          <Settings2 className="h-4 w-4 text-slate-400" aria-hidden="true" />
+          <Settings2 className="h-4 w-4 text-slate-500" aria-hidden="true" />
           Simulation settings
         </h2>
 
@@ -161,7 +161,7 @@ export function SettingsForm({
           }
           disabled={startDisabledReason !== null || busy}
           title={startDisabledReason ?? 'Start a backfill with these settings'}
-          className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white ring-1 ring-brand-600 hover:enabled:bg-brand-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 disabled:ring-slate-200"
+          className="rounded-lg bg-brand-600 px-3 py-1.5 text-sm font-medium text-white ring-1 ring-brand-600 hover:enabled:bg-brand-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500 disabled:ring-slate-200"
         >
           Start with these settings
         </button>
@@ -201,7 +201,7 @@ export function SettingsForm({
               onReseed({ totalRecords: draft.totalRecords, partitionCount: draft.partitionCount })
             }
             disabled={locked || busy}
-            className="rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-slate-700 ring-1 ring-slate-300 hover:enabled:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
+            className="rounded-lg bg-white px-3 py-1.5 text-sm font-medium text-slate-700 ring-1 ring-slate-300 hover:enabled:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-500"
           >
             Regenerate dataset
           </button>

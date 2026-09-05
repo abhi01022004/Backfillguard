@@ -198,12 +198,12 @@ export function PatientDetailDrawer({
                       {row.label}
                       {/* Age is not in the online-updatable whitelist; saying so explains why. */}
                       {row.online ? null : (
-                        <span className="ml-1.5 text-[10px] text-slate-400">not updatable online</span>
+                        <span className="ml-1.5 text-[10px] text-slate-500">not updatable online</span>
                       )}
                     </dt>
                     <dd className="font-mono text-sm tabular-nums text-slate-900">
                       {detail.patient[row.key]}
-                      <span className="ml-1 text-[10px] text-slate-400">{row.unit}</span>
+                      <span className="ml-1 text-[10px] text-slate-500">{row.unit}</span>
                     </dd>
                   </div>
                 ))}
@@ -249,7 +249,7 @@ export function PatientDetailDrawer({
                 <p className="mt-2 flex items-baseline justify-between border-t border-slate-200 pt-2 text-sm">
                   <span className="font-medium text-slate-700">
                     Recomputed total
-                    <span className="ml-1.5 font-mono text-[10px] text-slate-400">
+                    <span className="ml-1.5 font-mono text-[10px] text-slate-500">
                       {detail.risk.configVersion}
                     </span>
                   </span>
@@ -277,7 +277,7 @@ export function PatientDetailDrawer({
               </div>
             </section>
 
-            <p className="border-t border-slate-100 pt-3 text-[11px] text-slate-400">
+            <p className="border-t border-slate-100 pt-3 text-[11px] text-slate-500">
               {DISCLAIMER.LONG}
             </p>
           </div>

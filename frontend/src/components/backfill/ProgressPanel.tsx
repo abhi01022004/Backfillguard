@@ -28,7 +28,7 @@ function Stat({
 }) {
   return (
     <div className="flex items-start gap-2.5">
-      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden="true" />
+      <Icon className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" aria-hidden="true" />
       <div className="min-w-0">
         <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
         <p className="text-sm font-semibold tabular-nums text-slate-900">{value}</p>
@@ -64,7 +64,7 @@ export function ProgressPanel({ job }: ProgressPanelProps) {
                 <span className="text-lg font-semibold tabular-nums text-slate-900">
                   {job.metrics.processed.toLocaleString('en-GB')}
                 </span>
-                <span className="text-slate-400"> / </span>
+                <span className="text-slate-500"> / </span>
                 <span className="tabular-nums">
                   {job.metrics.eligibleRecords.toLocaleString('en-GB')}
                 </span>

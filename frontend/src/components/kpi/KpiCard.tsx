@@ -17,7 +17,7 @@ import type { LucideIcon } from 'lucide-react';
 export type KpiTone = 'neutral' | 'good' | 'warning' | 'critical' | 'brand';
 
 const TONES: Record<KpiTone, { value: string; icon: string; ring: string }> = {
-  neutral: { value: 'text-slate-900', icon: 'text-slate-400', ring: 'ring-slate-200' },
+  neutral: { value: 'text-slate-900', icon: 'text-slate-500', ring: 'ring-slate-200' },
   brand: { value: 'text-brand-800', icon: 'text-brand-500', ring: 'ring-brand-200' },
   good: { value: 'text-emerald-700', icon: 'text-emerald-500', ring: 'ring-emerald-200' },
   warning: { value: 'text-amber-700', icon: 'text-amber-500', ring: 'ring-amber-200' },
@@ -68,7 +68,7 @@ export function KpiCard({
     >
       <div className="flex items-start justify-between gap-2">
         <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</p>
-        <Icon className={`h-4 w-4 shrink-0 ${measured ? palette.icon : 'text-slate-300'}`} aria-hidden="true" />
+        <Icon className={`h-4 w-4 shrink-0 ${measured ? palette.icon : 'text-slate-500'}`} aria-hidden="true" />
       </div>
 
       {measured ? (
@@ -82,10 +82,10 @@ export function KpiCard({
       ) : (
         <>
           {/* An em dash, not a zero. The absence of a measurement is itself information. */}
-          <p className="mt-2 text-2xl font-semibold text-slate-300" aria-label="not measured yet">
+          <p className="mt-2 text-2xl font-semibold text-slate-500" aria-label="not measured yet">
             —
           </p>
-          <p className="mt-1 text-xs italic text-slate-400">{emptyHint}</p>
+          <p className="mt-1 text-xs italic text-slate-500">{emptyHint}</p>
         </>
       )}
     </div>

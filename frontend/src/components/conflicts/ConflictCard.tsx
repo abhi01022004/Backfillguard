@@ -90,7 +90,7 @@ export function ConflictCard({ conflict, onSelectPatient }: ConflictCardProps) {
             version={conflict.sourceVersion}
             tone="bg-white text-slate-600 ring-1 ring-slate-300"
           />
-          <ArrowRight className="h-3 w-3 text-slate-400" aria-hidden="true" />
+          <ArrowRight className="h-3 w-3 text-slate-500" aria-hidden="true" />
           <VersionPill
             label="database"
             version={conflict.currentVersion}
