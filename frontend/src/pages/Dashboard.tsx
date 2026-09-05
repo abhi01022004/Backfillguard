@@ -1,48 +1,27 @@
-import { Radio, Terminal, Users } from 'lucide-react';
+import { Users } from 'lucide-react';
 import { DISCLAIMER } from '@bg/shared';
 import { useLiveStream } from '../hooks/useLiveStream';
 import { useVerificationReport } from '../hooks/useVerificationReport';
+import { useConflicts } from '../hooks/useConflicts';
 import { KpiGrid } from '../components/kpi/KpiGrid';
 import { ProgressPanel } from '../components/backfill/ProgressPanel';
+import { PartitionGrid } from '../components/backfill/PartitionGrid';
 import { RecoveryTimeline } from '../components/backfill/RecoveryTimeline';
+import { EventTimeline } from '../components/events/EventTimeline';
+import { ConflictList } from '../components/conflicts/ConflictList';
 import { ConnectionNotice } from '../components/layout/ConnectionNotice';
 
 /**
  * The main dashboard (R14).
  *
- * Everything here is bound to live server state. Sections that later tasks fill — the partition grid, the
- * event timeline, conflict cards, the control panel — are announced as coming rather than mocked up, because
- * a placeholder that looks like a working feature is the same category of dishonesty as a placeholder
- * number.
+ * Everything here is bound to live server state. Sections that later tasks fill are announced as coming
+ * rather than mocked up, because a placeholder that looks like a working feature is the same category of
+ * dishonesty as a placeholder number.
  */
-
-interface PendingSection {
-  label: string;
-  detail: string;
-  icon: typeof Users;
-}
-
-const PENDING_SECTIONS: PendingSection[] = [
-  {
-    label: 'Partition status',
-    detail: 'Per-partition progress and state across all partitions',
-    icon: Terminal,
-  },
-  {
-    label: 'Live activity and conflict detail',
-    detail: 'Event timeline, clinical update feed, and per-conflict version evidence',
-    icon: Radio,
-  },
-  {
-    label: 'Patients and simulation controls',
-    detail: 'Patient records with version history, and the run controls',
-    icon: Users,
-  },
-];
-
 export function Dashboard() {
   const { status, job, events, resync } = useLiveStream();
   const { report, loaded: reportLoaded } = useVerificationReport(events);
+  const conflicts = useConflicts(events);
 
   return (
     <div className="mx-auto max-w-[1600px] space-y-4 px-4 py-6 sm:px-6">
@@ -52,10 +31,32 @@ export function Dashboard() {
 
       {/* Two columns on wide screens, stacking to one on narrow (R14.7). */}
       <div className="grid gap-4 xl:grid-cols-3">
-        <div className="xl:col-span-2">
+        <div className="space-y-4 xl:col-span-2">
           <ProgressPanel job={job} />
+          <PartitionGrid job={job} currentPartition={job?.metrics?.currentPartition ?? null} />
         </div>
         <RecoveryTimeline job={job} events={events} />
+      </div>
+
+      {/**
+       * Activity and conflicts sit side by side and both scroll internally, with a bounded height.
+       *
+       * Without the cap the page would grow without limit during a run and the controls above would scroll
+       * out of reach exactly when they are needed.
+       */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="max-h-[32rem] min-h-0">
+          <EventTimeline events={events} />
+        </div>
+        <div className="max-h-[32rem] min-h-0">
+          <ConflictList
+            conflicts={conflicts.conflicts}
+            total={conflicts.total}
+            open={conflicts.open}
+            loading={conflicts.loading}
+            error={conflicts.error}
+          />
+        </div>
       </div>
 
       <section
@@ -66,25 +67,19 @@ export function Dashboard() {
           Still to come
         </h2>
         <p className="mt-1 text-xs text-slate-500">
-          These sections are not built yet. They are listed rather than mocked up, so nothing on this page
-          looks like a working feature that is not.
+          Not built yet, so listed rather than mocked up — nothing on this page should look like a working
+          feature that is not.
         </p>
-        <ul className="mt-3 grid gap-2 sm:grid-cols-3">
-          {PENDING_SECTIONS.map((section) => {
-            const Icon = section.icon;
-            return (
-              <li
-                key={section.label}
-                className="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-white p-3"
-              >
-                <Icon className="mt-0.5 h-4 w-4 shrink-0 text-slate-300" aria-hidden="true" />
-                <div>
-                  <p className="text-xs font-medium text-slate-700">{section.label}</p>
-                  <p className="mt-0.5 text-xs text-slate-500">{section.detail}</p>
-                </div>
-              </li>
-            );
-          })}
+        <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+          <li className="flex items-start gap-2.5 rounded-lg border border-slate-200 bg-white p-3">
+            <Users className="mt-0.5 h-4 w-4 shrink-0 text-slate-300" aria-hidden="true" />
+            <div>
+              <p className="text-xs font-medium text-slate-700">Patients and simulation controls</p>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Patient records with version history, and the run controls
+              </p>
+            </div>
+          </li>
         </ul>
       </section>
 
