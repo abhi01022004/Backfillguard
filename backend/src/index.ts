@@ -41,6 +41,7 @@ async function start(): Promise<void> {
   const jobs = new PrismaJobRepository(prisma);
   const notificationStore = new PrismaNotificationRepository(prisma);
 
+
   const clock = createSystemClock();
   const rng = createRng(env.SIM_SEED);
 
@@ -93,6 +94,8 @@ async function start(): Promise<void> {
     rng,
     seed: env.SIM_SEED,
     settings: envSimulationSettings,
+    // Read-only, purely so verification can audit the alerts the decorator raised.
+    notifications: notificationStore,
   });
   orchestratorRef = orchestrator;
 

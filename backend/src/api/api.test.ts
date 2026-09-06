@@ -106,6 +106,8 @@ async function makeHarness(
     clock,
     rng,
     seed: DEFAULT_SEED,
+    // Read-only handle, so the verification report carries the notification advisory section.
+    notifications: notificationStore,
     settings: {
       ...DEFAULT_SIMULATION_SETTINGS,
       totalRecords: TOTAL,

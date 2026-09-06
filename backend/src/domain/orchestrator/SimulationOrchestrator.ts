@@ -21,6 +21,7 @@ import { RecoveryFailedError } from '../../lib/errors';
 import type { EventSink } from '../ports/EventSink';
 import type { JobRepository } from '../ports/JobRepository';
 import type { PatientRepository } from '../ports/PatientRepository';
+import type { NotificationRepository } from '../ports/NotificationRepository';
 import { BackfillEngine, type EngineCounters } from '../engine/BackfillEngine';
 import { CheckpointManager } from '../engine/CheckpointManager';
 import { ConflictEngine } from '../engine/ConflictEngine';
@@ -92,6 +93,15 @@ export interface OrchestratorDeps {
   rng: Rng;
   settings: SimulationSettings;
   seed: number;
+  /**
+   * Optional, and used for one thing only: letting the verification engine audit the run's risk alerts.
+   *
+   * The orchestrator never writes notifications itself — those are raised by the repository decorator around
+   * the guarded write. This is a read-only handle passed straight through, so the audit can cross-check
+   * stored alerts against the write ledger. Absent in harnesses that do not wire notifications, in which
+   * case the report simply carries no advisory section.
+   */
+  notifications?: NotificationRepository;
 }
 
 export interface StartOptions {
@@ -888,6 +898,7 @@ export class SimulationOrchestrator {
         jobs: this.deps.jobs,
         events: this.deps.events,
         clock: this.deps.clock,
+        ...(this.deps.notifications ? { notifications: this.deps.notifications } : {}),
       });
 
       const report = await verifier.verify(this.jobId);

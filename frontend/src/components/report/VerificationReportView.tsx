@@ -2,6 +2,7 @@ import {
   CheckCircle2,
   Download,
   Loader2,
+  MessageCircle,
   Printer,
   ShieldCheck,
   ShieldX,
@@ -10,6 +11,7 @@ import {
 import {
   DISCLAIMER,
   VERIFICATION_VERDICT,
+  type NotificationAdvisory,
   type VerificationCheckResult,
   type VerificationMetrics,
   type VerificationReport,
@@ -206,6 +208,120 @@ export interface VerificationReportViewProps {
   onVerify: () => void;
   verifyDisabledReason: string | null;
   verifyBusy: boolean;
+}
+
+/**
+ * The notification advisory, rendered as explicitly **not** part of the verdict.
+ *
+ * The visual language is deliberately different from the checks above: no pass/fail icon in the heading, a
+ * neutral border, and a sentence saying in plain words that nothing here changes the verdict. A reader
+ * skimming the page should not be able to mistake an advisory anomaly for a data-safety failure — the whole
+ * reason this is a separate section rather than a seventh check.
+ *
+ * The two must-be-zero figures are still highlighted when non-zero, because a defect that is reported quietly
+ * may as well not be reported.
+ */
+function NotificationAdvisorySection({ advisory }: { advisory: NotificationAdvisory }) {
+  return (
+    <section
+      aria-labelledby="advisory-heading"
+      className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="max-w-2xl">
+          <h2 id="advisory-heading" className="flex items-center gap-2 text-base font-semibold text-slate-900">
+            <MessageCircle className="h-4 w-4 text-slate-500" aria-hidden="true" />
+            Risk alerts — advisory
+          </h2>
+          <p className="mt-1.5 text-sm text-slate-600">
+            Observations about the run&rsquo;s outbound notifications.{' '}
+            <span className="font-medium text-slate-800">
+              None of this affects the verdict above.
+            </span>{' '}
+            The verdict is a statement about patient data; a fault in a messaging simulator is a different kind
+            of problem and should not be able to make a provably correct migration look unsafe.
+          </p>
+        </div>
+
+        <span
+          className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${
+            advisory.clean ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'
+          }`}
+        >
+          {advisory.clean ? 'no anomalies' : 'anomaly found'}
+        </span>
+      </div>
+
+      <dl className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <AdvisoryFigure label="Alerts sent" value={advisory.sent} />
+        <AdvisoryFigure
+          label="Stale alerts prevented"
+          value={advisory.cancelled}
+          note="the guard refused the write before the alert could go out"
+        />
+        <AdvisoryFigure
+          label="Still queued at end"
+          value={advisory.queuedAtEnd}
+          alarming={advisory.queuedAtEnd > 0}
+          note="should be zero: every staged alert should have been sent or cancelled"
+        />
+        <AdvisoryFigure
+          label="Sent without a committed write"
+          value={advisory.staleNotifications}
+          alarming={advisory.staleNotifications > 0}
+          note="must be zero"
+        />
+        <AdvisoryFigure
+          label="Duplicate alerts"
+          value={advisory.duplicateNotifications}
+          alarming={advisory.duplicateNotifications > 0}
+          note="must be zero"
+        />
+        <AdvisoryFigure
+          label="Provider failures"
+          value={advisory.failed}
+          alarming={advisory.failed > 0}
+        />
+      </dl>
+
+      <p className="mt-4 border-t border-slate-100 pt-3 text-xs leading-relaxed text-slate-500">
+        <span className="font-medium text-slate-600">Method:</span> {advisory.method}
+      </p>
+
+      {advisory.offendingPatientCodes.length > 0 ? (
+        <p className="mt-2 text-xs text-amber-900">
+          <span className="font-medium">Records involved:</span>{' '}
+          <span className="font-mono">{advisory.offendingPatientCodes.join(', ')}</span>
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function AdvisoryFigure({
+  label,
+  value,
+  note,
+  alarming = false,
+}: {
+  label: string;
+  value: number;
+  note?: string;
+  alarming?: boolean;
+}) {
+  return (
+    <div className={`rounded-lg border p-3 ${alarming ? 'border-amber-300 bg-amber-50' : 'border-slate-200'}`}>
+      <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</dt>
+      <dd
+        className={`mt-1 text-xl font-semibold tabular-nums ${
+          alarming ? 'text-amber-800' : 'text-slate-900'
+        }`}
+      >
+        {value.toLocaleString('en-GB')}
+      </dd>
+      {note ? <p className="mt-0.5 text-[11px] text-slate-500">{note}</p> : null}
+    </div>
+  );
 }
 
 export function VerificationReportView({
@@ -407,6 +523,10 @@ export function VerificationReportView({
               />
             </div>
           </section>
+
+          {report.advisory ? (
+            <NotificationAdvisorySection advisory={report.advisory.notifications} />
+          ) : null}
 
           <p className="pb-2 text-xs leading-relaxed text-slate-500">{DISCLAIMER.LONG}</p>
         </>

@@ -53,6 +53,51 @@ export interface VerificationMetrics {
   coveragePercent: number;
 }
 
+/**
+ * Independently re-derived facts about the run's outbound risk alerts.
+ *
+ * ## Why this is an advisory and not a seventh check
+ *
+ * `checks[]` decides the verdict, and the verdict is a statement about **data safety**: was every record
+ * considered, and did any stale value land on top of newer clinical data. Notifications are a side effect
+ * *of* that process, not part of it.
+ *
+ * Folding these in would mean a defect in a demo messaging simulator could turn a run whose data was
+ * provably correct into `VERIFICATION_FAILED`. That would misrepresent what the verdict means — a reader
+ * seeing a red result would reasonably conclude patient data had been corrupted when it had not. Keeping
+ * the two separate is what lets `VERIFIED_SAFE` retain a precise meaning.
+ *
+ * It is still measured the same way everything else here is: by re-reading stored notification rows and
+ * cross-checking them against the write ledger, never by trusting a counter. And a non-zero anomaly is
+ * reported loudly — it emits a CRITICAL event — it simply does not change the verdict.
+ */
+export interface NotificationAdvisory {
+  sent: number;
+  /** Alerts withheld because the version guard refused the underlying write. Expected to be > 0 under contention. */
+  cancelled: number;
+  /** Still QUEUED when the run ended. Non-zero means results were staged and never resolved either way. */
+  queuedAtEnd: number;
+  failed: number;
+  /**
+   * Alerts transmitted for a result that has no matching applied guarded write. **Must be 0.**
+   *
+   * This is the notification equivalent of `staleOverwrites`: it is the number that would be non-zero if
+   * an alert had ever gone out describing data the database never actually committed.
+   */
+  staleNotifications: number;
+  /** More than one alert transmitted for the same job, patient, version and band. **Must be 0.** */
+  duplicateNotifications: number;
+  /** True when both must-be-zero figures are zero. */
+  clean: boolean;
+  offendingPatientCodes: string[];
+  /** How these numbers were reached, so a reviewer can judge their independence. */
+  method: string;
+}
+
+export interface VerificationAdvisory {
+  notifications: NotificationAdvisory;
+}
+
 export interface VerificationReport {
   jobId: string;
   mode: BackfillMode;
@@ -61,6 +106,13 @@ export interface VerificationReport {
   verdict: VerificationVerdict;
   metrics: VerificationMetrics;
   checks: VerificationCheckResult[];
+  /**
+   * Non-blocking observations. Absent when the notification feature is not wired in.
+   *
+   * Deliberately optional rather than defaulted to zeros: a report from a system with no notification
+   * store should say nothing about notifications, not claim it measured zero of them.
+   */
+  advisory?: VerificationAdvisory;
   /** The plain-language guarantee statement shown on the report (R20.4). */
   guaranteeStatement: string;
   jobStartedAt: string | null;

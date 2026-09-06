@@ -21,6 +21,10 @@ import { InMemoryPatientRepository } from '../../infra/repositories/InMemoryPati
 import { generatePatients } from '../../infra/seed/patientGenerator';
 import { SimulationOrchestrator } from '../orchestrator/SimulationOrchestrator';
 import { VerificationEngine } from './VerificationEngine';
+import { InMemoryNotificationRepository } from '../../infra/repositories/InMemoryNotificationRepository';
+import { NotifyingPatientRepository } from '../../infra/repositories/NotifyingPatientRepository';
+import { DemoWhatsAppProvider } from '../../infra/notification/DemoWhatsAppProvider';
+import { NotificationService } from '../notification/NotificationService';
 
 /**
  * The audit, and — more importantly — proof that it can fail.
@@ -41,6 +45,9 @@ interface Harness {
   events: InMemoryEventSink;
   orchestrator: SimulationOrchestrator;
   verifier: VerificationEngine;
+  /** The notification store, so a test can corrupt it and check the advisory notices. */
+  notificationStore: InMemoryNotificationRepository;
+  notifications: NotificationService;
 }
 
 async function makeHarness(): Promise<Harness> {
@@ -53,8 +60,23 @@ async function makeHarness(): Promise<Harness> {
     generatePatients({ totalRecords: TOTAL, partitionCount: PARTITIONS, seed: SEED }),
   );
 
+  /**
+   * The notification stack, wired as the composition root wires it.
+   *
+   * The orchestrator gets the decorated repository so a run raises real alerts, and the verifier gets the
+   * store read-only so it can cross-check them against the write ledger.
+   */
+  const notificationStore = new InMemoryNotificationRepository();
+  const notifications = new NotificationService({
+    notifications: notificationStore,
+    provider: new DemoWhatsAppProvider(),
+    events,
+  });
+  const guardedPatients = new NotifyingPatientRepository(patients, notifications);
+
   const orchestrator = new SimulationOrchestrator({
-    patients,
+    patients: guardedPatients,
+    notifications: notificationStore,
     jobs,
     events,
     clock,
@@ -71,9 +93,23 @@ async function makeHarness(): Promise<Harness> {
     },
   });
 
-  const verifier = new VerificationEngine({ patients, jobs, events, clock });
+  const verifier = new VerificationEngine({
+    patients,
+    jobs,
+    events,
+    clock,
+    notifications: notificationStore,
+  });
 
-  return { patients, jobs, events, orchestrator, verifier };
+  return {
+    patients,
+    jobs,
+    events,
+    orchestrator,
+    verifier,
+    notificationStore,
+    notifications,
+  };
 }
 
 /** Runs a clean backfill to completion, leaving state that should verify safe. */
@@ -543,5 +579,209 @@ describe('verification through the orchestrator', () => {
     expect(second.checks.map((c) => `${c.id}:${c.passed}`)).toEqual(
       first.checks.map((c) => `${c.id}:${c.passed}`),
     );
+  });
+});
+
+/**
+ * The notification advisory.
+ *
+ * Two properties matter here, and the second is the reason the advisory exists as a separate section:
+ *
+ * 1. It **measures** independently — by joining sent alerts against the write ledger, not by reading a
+ *    notification counter. So it can catch a notification layer that lied.
+ * 2. It **never changes the verdict.** The last test in this block corrupts the notification store badly
+ *    enough that the advisory reports a defect, and asserts the run is still `VERIFIED_SAFE` — because the
+ *    patient data is still provably correct, and that is what the verdict is a statement about.
+ */
+describe('VerificationEngine: notification advisory', () => {
+  it('reports the alerts a clean run produced, and finds nothing wrong', async () => {
+    const harness = await makeHarness();
+    await runCleanBackfill(harness);
+
+    const report = await harness.verifier.verify(JOB);
+    const advisory = report.advisory!.notifications;
+
+    expect(report.verdict).toBe(VERIFICATION_VERDICT.VERIFIED_SAFE);
+    expect(advisory.sent).toBeGreaterThan(0);
+    expect(advisory.staleNotifications).toBe(0);
+    expect(advisory.duplicateNotifications).toBe(0);
+    expect(advisory.clean).toBe(true);
+    // Nothing left mid-flight: every staged alert was either sent or cancelled.
+    expect(advisory.queuedAtEnd).toBe(0);
+    expect(advisory.failed).toBe(0);
+  });
+
+  it('every sent alert corresponds to an applied guarded write at that exact version', async () => {
+    const harness = await makeHarness();
+    await runCleanBackfill(harness);
+
+    const sent = await harness.notificationStore.list({
+      jobId: JOB,
+      status: 'SENT',
+      limit: 100_000,
+    });
+    const writes = await harness.patients.listWriteLedger(JOB);
+
+    const committed = new Set(
+      writes.filter((write) => write.applied).map((w) => `${w.patientId}:${w.guardVersion}`),
+    );
+
+    // Asserted here too, independently of the engine, so this suite is not merely agreeing with itself.
+    for (const record of sent) {
+      expect(committed.has(`${record.patientId}:${record.patientVersion}`)).toBe(true);
+    }
+  });
+
+  it('omits the advisory entirely when no notification store is wired', async () => {
+    const harness = await makeHarness();
+    await runCleanBackfill(harness);
+
+    // A verifier with no notification handle must say nothing rather than report zeros it never measured.
+    const bare = new VerificationEngine({
+      patients: harness.patients,
+      jobs: harness.jobs,
+      events: harness.events,
+      clock: createManualClock(),
+    });
+
+    const report = await bare.verify(JOB);
+    expect(report.advisory).toBeUndefined();
+  });
+
+  it('detects an alert sent without a matching committed write', async () => {
+    const harness = await makeHarness();
+    await runCleanBackfill(harness);
+
+    /**
+     * Falsifiability: forge an alert at a version that never committed.
+     *
+     * v9999 has no applied ledger row, so the join must find no partner and count this as stale. Without
+     * this case "staleNotifications = 0" would be an untested claim.
+     */
+    const { record } = await harness.notificationStore.createOrGet({
+      jobId: JOB,
+      patientId: 1,
+      patientCode: 'P0001',
+      patientVersion: 9999,
+      riskScore: 90,
+      riskLevel: RISK_LEVEL.HIGH,
+      channel: 'WHATSAPP',
+      status: 'QUEUED',
+      message: 'forged',
+      recipient: '+91 9000000001',
+      reason: 'HIGH_RISK_DETECTED',
+      idempotencyKey: `${JOB}:1:9999:HIGH`,
+    });
+    await harness.notificationStore.markSent(record.id, 'DEMO-WA-999999');
+
+    const report = await harness.verifier.verify(JOB);
+    const advisory = report.advisory!.notifications;
+
+    expect(advisory.staleNotifications).toBe(1);
+    expect(advisory.clean).toBe(false);
+    expect(advisory.offendingPatientCodes).toContain('P0001');
+  });
+
+  it('detects a duplicate alert even when its stored dedup key is unique', async () => {
+    const harness = await makeHarness();
+    await runCleanBackfill(harness);
+
+    const sent = await harness.notificationStore.list({
+      jobId: JOB,
+      status: 'SENT',
+      limit: 10,
+    });
+    const original = sent[0]!;
+
+    /**
+     * The key is deliberately *different* from the one already stored, so the unique index accepts the row.
+     *
+     * That is exactly the bug this measurement is designed to catch: relying on the stored key would report
+     * zero duplicates here, because both keys are distinct. Rebuilding the key from the row's own patient,
+     * version and band makes the collision visible.
+     */
+    const { record } = await harness.notificationStore.createOrGet({
+      jobId: JOB,
+      patientId: original.patientId,
+      patientCode: original.patientCode,
+      patientVersion: original.patientVersion,
+      riskScore: original.riskScore,
+      riskLevel: original.riskLevel,
+      channel: 'WHATSAPP',
+      status: 'QUEUED',
+      message: original.message,
+      recipient: original.recipient,
+      reason: 'HIGH_RISK_DETECTED',
+      idempotencyKey: `${original.idempotencyKey}:mis-keyed`,
+    });
+    await harness.notificationStore.markSent(record.id, 'DEMO-WA-999998');
+
+    const report = await harness.verifier.verify(JOB);
+    const advisory = report.advisory!.notifications;
+
+    expect(advisory.duplicateNotifications).toBe(1);
+    expect(advisory.clean).toBe(false);
+    expect(advisory.offendingPatientCodes).toContain(original.patientCode);
+  });
+
+  it('does NOT flip the verdict, even when the advisory finds a defect', async () => {
+    const harness = await makeHarness();
+    await runCleanBackfill(harness);
+
+    const { record } = await harness.notificationStore.createOrGet({
+      jobId: JOB,
+      patientId: 1,
+      patientCode: 'P0001',
+      patientVersion: 4242,
+      riskScore: 95,
+      riskLevel: RISK_LEVEL.HIGH,
+      channel: 'WHATSAPP',
+      status: 'QUEUED',
+      message: 'forged',
+      recipient: '+91 9000000001',
+      reason: 'HIGH_RISK_DETECTED',
+      idempotencyKey: `${JOB}:1:4242:HIGH`,
+    });
+    await harness.notificationStore.markSent(record.id, 'DEMO-WA-999997');
+
+    const report = await harness.verifier.verify(JOB);
+
+    // The defect is reported…
+    expect(report.advisory!.notifications.staleNotifications).toBe(1);
+    expect(report.advisory!.notifications.clean).toBe(false);
+
+    // …and the data-safety verdict is untouched, because no patient data was harmed.
+    expect(report.verdict).toBe(VERIFICATION_VERDICT.VERIFIED_SAFE);
+    expect(report.checks.every((entry) => entry.passed)).toBe(true);
+
+    // The advisory must not have smuggled itself into the graded checks.
+    expect(report.checks).toHaveLength(6);
+    expect(
+      report.checks.some((entry) => entry.title.toLowerCase().includes('notification')),
+    ).toBe(false);
+  });
+
+  it('excludes hand-triggered test sends from the run\u2019s advisory', async () => {
+    const harness = await makeHarness();
+    await runCleanBackfill(harness);
+
+    const before = (await harness.verifier.verify(JOB)).advisory!.notifications;
+
+    // Filed under its own job id, exactly as the API route does.
+    await harness.notifications.sendManual({
+      jobId: 'MANUAL-TEST',
+      patientId: 1,
+      patientCode: 'P0001',
+      patientVersion: 1,
+      riskScore: 90,
+      riskLevel: RISK_LEVEL.HIGH,
+    });
+
+    const after = (await harness.verifier.verify(JOB)).advisory!.notifications;
+
+    // A button press has no matching ledger row, so counting it would have shown a phantom stale alert.
+    expect(after.sent).toBe(before.sent);
+    expect(after.staleNotifications).toBe(0);
+    expect(after.clean).toBe(true);
   });
 });

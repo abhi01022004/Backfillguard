@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { VERIFICATION_CHECK, VERIFICATION_VERDICT } from '@bg/shared';
+import {
+  VERIFICATION_CHECK,
+  VERIFICATION_VERDICT,
+  type NotificationAdvisory,
+} from '@bg/shared';
 import { makeReport, makeVerificationMetrics } from '../../test/fixtures';
 import { VerificationReportView } from './VerificationReportView';
 import { ComparisonView } from '../compare/ComparisonView';
@@ -333,5 +337,97 @@ describe('StaleOverwriteCallout', () => {
 
     expect(screen.queryByText('STALE OVERWRITE DETECTED ❌')).not.toBeInTheDocument();
     expect(screen.getByText(/no stale overwrite \(nothing changed underneath it\)/)).toBeInTheDocument();
+  });
+});
+
+/**
+ * The advisory section's one job: to be unmistakably separate from the verdict.
+ *
+ * A reader skimming the report must not be able to read a notification anomaly as a data-safety failure. That
+ * is a presentation property, so it can only be broken here, and it is the entire reason this is a section of
+ * its own rather than a seventh check.
+ */
+describe('VerificationReportView: notification advisory', () => {
+  const advisory: NotificationAdvisory = {
+    sent: 12,
+    cancelled: 3,
+    queuedAtEnd: 0,
+    failed: 0,
+    staleNotifications: 0,
+    duplicateNotifications: 0,
+    clean: true,
+    offendingPatientCodes: [],
+    method: 'Joined against the write ledger.',
+  };
+
+  const renderWith = (overrides: Partial<NotificationAdvisory> = {}) =>
+    render(
+      <VerificationReportView
+        report={makeReport({ advisory: { notifications: { ...advisory, ...overrides } } })}
+        loading={false}
+        loaded
+        error={null}
+        onVerify={() => {}}
+        verifyDisabledReason={null}
+        verifyBusy={false}
+      />,
+    );
+
+  it('states in plain words that it does not affect the verdict', () => {
+    renderWith();
+
+    expect(screen.getByText(/None of this affects the verdict above/i)).toBeInTheDocument();
+  });
+
+  it('is absent entirely when the report carries no advisory', () => {
+    render(
+      <VerificationReportView
+        report={makeReport()}
+        loading={false}
+        loaded
+        error={null}
+        onVerify={() => {}}
+        verifyDisabledReason={null}
+        verifyBusy={false}
+      />,
+    );
+
+    // A report from a system without notifications must say nothing about them.
+    expect(screen.queryByText(/Risk alerts — advisory/)).not.toBeInTheDocument();
+  });
+
+  it('reports a clean advisory without borrowing the verdict\u2019s language', () => {
+    renderWith();
+
+    const section = screen.getByRole('region', { name: /Risk alerts — advisory/ });
+
+    expect(section).toHaveTextContent('no anomalies');
+    // Scoped to the section: "passed"/"verified" belong to the graded checks, not here.
+    expect(section).not.toHaveTextContent(/VERIFIED SAFE/);
+    expect(section).not.toHaveTextContent(/\bpassed\b/i);
+  });
+
+  it('highlights a stale alert as an anomaly and names the records', () => {
+    renderWith({
+      staleNotifications: 2,
+      clean: false,
+      offendingPatientCodes: ['P0001', 'P0002'],
+    });
+
+    expect(screen.getByText('anomaly found')).toBeInTheDocument();
+    expect(screen.getByText('P0001, P0002')).toBeInTheDocument();
+  });
+
+  it('keeps the verdict green even while the advisory reports an anomaly', () => {
+    renderWith({ staleNotifications: 1, clean: false });
+
+    // The distinction the whole design rests on, asserted at the point a reader would see it.
+    expect(screen.getByText('VERIFIED SAFE')).toBeInTheDocument();
+    expect(screen.getByText('anomaly found')).toBeInTheDocument();
+  });
+
+  it('shows the method, so the measurement can be judged rather than trusted', () => {
+    renderWith();
+    expect(screen.getByText(/Joined against the write ledger/)).toBeInTheDocument();
   });
 });

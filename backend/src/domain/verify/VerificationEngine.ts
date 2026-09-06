@@ -5,9 +5,12 @@ import {
   DISCLAIMER,
   EVENT_SEVERITY,
   EVENT_TYPE,
+  NOTIFICATION_STATUS,
   VERIFICATION_CHECK,
   VERIFICATION_VERDICT,
   type BackfillMode,
+  type NotificationAdvisory,
+  type NotificationRecord,
   type Patient,
   type VerificationCheckResult,
   type VerificationMetrics,
@@ -17,6 +20,7 @@ import type { Clock } from '../../lib/clock';
 import type { EventSink } from '../ports/EventSink';
 import type { JobRepository } from '../ports/JobRepository';
 import type { PatientRepository } from '../ports/PatientRepository';
+import type { NotificationRepository } from '../ports/NotificationRepository';
 import { calculateRiskScore, toRiskInput } from '../risk/riskCalculator';
 import { RISK_CONFIG } from '../risk/riskConfig';
 
@@ -49,6 +53,14 @@ export interface VerificationEngineDeps {
   jobs: JobRepository;
   events: EventSink;
   clock: Clock;
+  /**
+   * Optional. When absent the report carries no `advisory` section at all.
+   *
+   * Optional rather than required-and-empty for the same reason the field is optional on the report: a
+   * system with no notification store should say nothing about notifications, not claim to have measured
+   * zero of them. It also keeps every existing harness constructing this engine unchanged.
+   */
+  notifications?: NotificationRepository;
 }
 
 /** How many offending records to name in a failure. Enough to act on, not a wall of text. */
@@ -150,8 +162,17 @@ export class VerificationEngine {
             ) / 10,
     };
 
+    /**
+     * Notifications are measured *after* the verdict is fixed, and take no part in it.
+     *
+     * The ordering here is deliberate and load-bearing: `passed` is computed from `checks` alone, so there
+     * is no expression anywhere below in which a notification figure could influence the verdict. That is
+     * a structural guarantee rather than a convention someone has to remember.
+     */
     const passed = checks.every((check) => check.passed);
     const verdict = passed ? VERIFICATION_VERDICT.VERIFIED_SAFE : VERIFICATION_VERDICT.VERIFICATION_FAILED;
+
+    const advisory = await this.measureNotifications(jobId, writes, byId);
 
     const startedAt = job?.startedAt ?? null;
     const completedAt = job?.completedAt ?? null;
@@ -164,6 +185,7 @@ export class VerificationEngine {
       verdict,
       metrics,
       checks,
+      ...(advisory ? { advisory: { notifications: advisory } } : {}),
       guaranteeStatement: passed
         ? 'Every eligible record was considered. Version conflicts were detected and re-evaluated. ' +
           'No newer online update was overwritten by stale backfill data.'
@@ -488,6 +510,120 @@ export class VerificationEngine {
       count: drifted.size,
       codes: this.codesFor([...drifted], byId),
     };
+  }
+
+  // ================================================================== notifications (advisory)
+
+  /**
+   * Re-derives what the run's risk alerts actually did. **Never affects the verdict.**
+   *
+   * ## How staleness is detected without trusting the notification layer
+   *
+   * A `SENT` alert claims to describe a HIGH result that was committed at a particular source version. So
+   * for every sent alert there must exist an **applied** row in the write ledger for that patient, in that
+   * job, whose `guardVersion` equals the alert's `patientVersion`.
+   *
+   * That is a cross-check between two tables written by different code paths: the ledger by the repository's
+   * guarded write, the notification by the service reacting to it. If the notification layer ever sent an
+   * alert for a result that was refused — or for a version that never committed — the join finds no partner
+   * row and the alert is counted as stale. Nothing in the notification record itself is taken on trust.
+   *
+   * ## Why duplicates are recomputed rather than read
+   *
+   * The store enforces uniqueness on `idempotencyKey`, so counting distinct stored keys would always
+   * return zero and prove only that the column is unique. Instead the key is **rebuilt** from each row's
+   * own `patientId`, `patientVersion` and `riskLevel`. A bug that wrote the wrong key would therefore still
+   * be caught, because the recomputed grouping would collide where the stored one did not.
+   */
+  private async measureNotifications(
+    jobId: string,
+    writes: { patientId: number; applied: boolean; guardVersion: number }[],
+    byId: Map<number, Patient>,
+  ): Promise<NotificationAdvisory | null> {
+    if (!this.deps.notifications) return null;
+
+    // Scoped to this job, so hand-triggered test sends — filed under their own id — cannot appear here.
+    const records = await this.deps.notifications.list({ jobId, limit: 100_000 });
+
+    const byStatus = (status: string) => records.filter((record) => record.status === status);
+
+    const sent = byStatus(NOTIFICATION_STATUS.SENT);
+
+    /**
+     * The set of (patient, version) pairs that provably committed under a guard.
+     *
+     * Built from applied ledger rows only. A refused row contributes nothing, which is precisely what makes
+     * a notification sent against one detectable.
+     */
+    const committed = new Set(
+      writes
+        .filter((write) => write.applied)
+        .map((write) => `${write.patientId}:${write.guardVersion}`),
+    );
+
+    const stale = sent.filter(
+      (record) => !committed.has(`${record.patientId}:${record.patientVersion}`),
+    );
+
+    const seen = new Map<string, number>();
+    for (const record of sent) {
+      // Rebuilt from the row's own fields rather than read from the stored key.
+      const key = `${record.patientId}:${record.patientVersion}:${record.riskLevel}`;
+      seen.set(key, (seen.get(key) ?? 0) + 1);
+    }
+    const duplicates = [...seen.values()]
+      .filter((count) => count > 1)
+      .reduce((total, count) => total + (count - 1), 0);
+
+    const duplicatedPatients = sent.filter((record) => {
+      const key = `${record.patientId}:${record.patientVersion}:${record.riskLevel}`;
+      return (seen.get(key) ?? 0) > 1;
+    });
+
+    const offending = this.notificationCodes([...stale, ...duplicatedPatients], byId);
+    const clean = stale.length === 0 && duplicates === 0;
+
+    if (!clean) {
+      /**
+       * Loud, but not verdict-changing.
+       *
+       * A stale or duplicated alert is a genuine defect and hiding it would defeat the point of measuring.
+       * Emitting CRITICAL means it surfaces on the live timeline and in the event log while leaving
+       * `VERIFIED_SAFE` to mean exactly what it says: the *data* is safe.
+       */
+      this.deps.events.emit({
+        type: EVENT_TYPE.VERIFICATION_FAILED,
+        severity: EVENT_SEVERITY.CRITICAL,
+        jobId,
+        message:
+          `Notification advisory: ${stale.length} alert(s) sent without a matching committed write and ` +
+          `${duplicates} duplicate alert(s). This does not change the data-safety verdict, but it is a defect.`,
+        payload: { staleNotifications: stale.length, duplicateNotifications: duplicates },
+      });
+    }
+
+    return {
+      sent: sent.length,
+      cancelled: byStatus(NOTIFICATION_STATUS.CANCELLED).length,
+      queuedAtEnd: byStatus(NOTIFICATION_STATUS.QUEUED).length,
+      failed: byStatus(NOTIFICATION_STATUS.FAILED).length,
+      staleNotifications: stale.length,
+      duplicateNotifications: duplicates,
+      clean,
+      offendingPatientCodes: offending,
+      method:
+        'Every SENT notification is joined against the write ledger; it is counted stale unless an ' +
+        'applied entry exists for the same patient whose guardVersion equals the alert source version. ' +
+        'Duplicates are found by rebuilding the dedup key from each row\u2019s own fields rather than ' +
+        'reading the stored key, so a mis-keyed row is still detected.',
+    };
+  }
+
+  private notificationCodes(records: NotificationRecord[], byId: Map<number, Patient>): string[] {
+    const codes = new Set(
+      records.map((record) => byId.get(record.patientId)?.patientCode ?? record.patientCode),
+    );
+    return [...codes].slice(0, MAX_REPORTED_CODES);
   }
 
   // ================================================================== helpers
