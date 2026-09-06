@@ -46,12 +46,14 @@ export function ConflictList({
     <section
       aria-labelledby="conflicts-heading"
       /*
-       * `h-full` so the height cap its container sets is actually inherited.
+       * `flex-1 min-h-0`, not `h-full`.
        *
-       * Without it the flex column sizes to its content and the inner `overflow-y-auto` never engages —
-       * the list scrolls the page instead of scrolling itself.
+       * The container caps height with `max-h`, and a percentage height against a max-height-only parent
+       * resolves to `auto` — so `h-full` left this sized to its content, clipped instead of scrolled, with the
+       * conflicts past the cut unreachable. Being a shrinkable flex item is what gives the list below a
+       * definite height so it can scroll itself.
        */
-      className="flex h-full min-h-0 flex-col rounded-xl border border-slate-200 bg-white shadow-sm"
+      className="flex min-h-0 flex-1 flex-col rounded-xl border border-slate-200 bg-white shadow-sm"
     >
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-3.5">
         <h2

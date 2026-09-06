@@ -107,13 +107,21 @@ export function ActivityPanel({
         aria-labelledby="tab-conflicts"
         hidden={tab !== 'conflicts'}
         /*
-         * `overflow-hidden` is load-bearing, not decoration.
+         * The bounded box must itself be the flex column. This is the part that is easy to get wrong.
          *
-         * `max-h` alone does not contain the child: the panel inside grows to its natural height and simply
-         * paints over whatever follows it on the page. With eight conflict cards that is roughly 470px of
-         * overspill, which silently collided with the sections below.
+         * `max-h` alone does not contain the child, so the panel inside grew to its natural height and painted
+         * over whatever followed it — roughly 470px of overspill with eight conflict cards.
+         *
+         * Adding `overflow-hidden` stopped the overlap and introduced a worse bug: `h-full` on the child is
+         * `height: 100%` against a parent that has only a *max*-height, which resolves to `auto`. The child
+         * still sized to its content, so it was clipped rather than scrolled and the remaining conflicts became
+         * unreachable — visually tidy, and the content was simply gone.
+         *
+         * Making this a flex column is what fixes it properly: the container's used height is capped by
+         * `max-h`, and a `flex-1 min-h-0` child is then shrunk to fit, which is what finally engages its own
+         * `overflow-y-auto`.
          */
-        className="max-h-[30rem] min-h-0 overflow-hidden"
+        className="flex max-h-[30rem] min-h-0 flex-col overflow-hidden"
       >
         <ConflictList
           conflicts={conflicts}
@@ -131,7 +139,7 @@ export function ActivityPanel({
         id="panel-events"
         aria-labelledby="tab-events"
         hidden={tab !== 'events'}
-        className="max-h-[30rem] min-h-0 overflow-hidden"
+        className="flex max-h-[30rem] min-h-0 flex-col overflow-hidden"
       >
         <EventTimeline events={events} />
       </div>

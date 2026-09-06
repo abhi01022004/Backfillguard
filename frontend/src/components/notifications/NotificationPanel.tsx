@@ -190,7 +190,7 @@ export function NotificationPanel({ notifications, onSelectPatient }: Notificati
         </div>
 
         <div className="min-w-0 xl:col-span-2">
-          <div className="max-h-[34rem] min-h-0 overflow-hidden">
+          <div className="flex max-h-[34rem] min-h-0 flex-col overflow-hidden">
             <MessageSimulator
               record={selected}
               providerName={provider?.name ?? null}

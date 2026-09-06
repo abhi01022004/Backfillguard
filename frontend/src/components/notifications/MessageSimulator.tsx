@@ -67,7 +67,7 @@ export function MessageSimulator({ record, providerName, simulated }: MessageSim
   return (
     <section
       aria-labelledby="simulator-heading"
-      className="flex h-full min-h-0 flex-col rounded-xl border border-slate-200 bg-white shadow-sm"
+      className="flex min-h-0 flex-1 flex-col rounded-xl border border-slate-200 bg-white shadow-sm"
     >
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-3.5">
         <h3
