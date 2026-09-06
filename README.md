@@ -449,6 +449,87 @@ A naive implementation would have sent the `v1` alert.
 
 ## 11. Running the demo
 
+### With Docker — one command
+
+Requires only Docker with Compose. Nothing else: no Node install, no database setup, no `.env`, no secrets.
+
+```bash
+docker compose up --build
+```
+
+Then open **http://localhost:8080** and press **RUN DEMO**.
+
+The first build takes a few minutes; after that it is cached. On start the backend applies its migrations and
+seeds 1,000 synthetic patients automatically, and the frontend waits for the backend's healthcheck before
+accepting traffic — so the first page load is never a 502.
+
+| | |
+|---|---|
+| Dashboard | http://localhost:8080 |
+| API through the proxy | http://localhost:8080/api/health |
+| Stop, keeping data | `docker compose down` |
+| Stop and wipe the database | `docker compose down -v` |
+| Reseed by hand | `docker compose exec backend npm run db:seed` |
+| Logs | `docker compose logs -f backend` |
+
+**Verified end to end in containers**, matching the local run exactly: `VERIFIED_SAFE`, 100% coverage,
+0 stale overwrites, 11 conflicts, 410 alerts sent, 1 prevented, advisory clean. A `docker compose restart`
+preserves the completed run and its audit rather than reseeding over it.
+
+<details>
+<summary><b>How it is put together, and the decisions that shaped it</b></summary>
+
+**Two services, one published.** `frontend` is nginx: it serves the built SPA and proxies `/api` and `/live` to
+`backend` over the internal network. The backend port is deliberately *not* published — nothing outside the
+compose network needs it, and exposing it would invite the dashboard to be pointed at a different origin than
+the one it was built for.
+
+**Why nginx rather than teaching Express to serve the bundle.** The backend serves no static assets by design.
+Adding that would mean changing application code to suit the packaging. nginx also reproduces the Vite dev
+proxy exactly — same-origin `/api` and `/live` with a websocket upgrade — so the app behaves identically in
+development and in a container, and no CORS preflight ever happens.
+
+**The `/live` upgrade is load-bearing.** nginx sets `Upgrade` and `Connection` on that route. Without them
+Socket.IO silently falls back to HTTP long-polling: the dashboard still updates, just less promptly and with far
+more requests — the kind of degradation nobody notices until a demo feels sluggish.
+
+**Seeding runs only when the volume is new.** Seeding calls `replaceAll`, which is destructive; doing it on
+every boot would silently wipe a completed run each time the container restarted, and the wipe would look like
+data loss rather than a seed. Presence of the database file is the signal that the volume has been initialised
+before. `SEED_ON_START=true` forces a reseed, `false` boots empty.
+
+**A named volume, not a bind mount.** The image chowns the data directory to the unprivileged `node` user before
+dropping privileges, and a named volume inherits that ownership on first use. A host bind mount would not, and
+the container would fail to write its own database.
+
+**`tsx` is a runtime dependency here, not a build tool.** The backend has no JavaScript build step —
+`npm run build` is `tsc --noEmit` and `npm start` is `tsx src/index.ts`, so TypeScript is executed directly and
+`@bg/shared` is consumed from source with no dist/src ambiguity. `--omit=dev` would therefore produce an image
+that builds cleanly and crashes on boot. The Prisma CLI is likewise needed at start, to apply migrations.
+
+**Image sizes: 657 MB backend, 74 MB frontend** (on-disk content; `docker images` reports more because it counts
+build provenance manifests). The first working version of the backend image was about 1.5 GB. Two things fixed
+it, and both are worth knowing:
+
+- `chown -R /app` rewrites metadata on ~40,000 dependency files, and because that changes them the layer stores
+  a *second full copy* of the tree — roughly 500 MB. Only the data directory actually needs to be writable.
+- A single shared `npm ci` meant the backend carried the entire frontend toolchain — lucide-react, vite,
+  rolldown, lightningcss — about 160 MB it can never load. The install is now scoped per workspace.
+
+What remains is mostly irreducible for this design: Prisma's native engines and CLI (~180 MB), the Debian slim
+base (~220 MB), and the backend's own test tooling, which `vitest` drags in as a devDependency of the workspace
+whose devDependencies also supply `tsx`. Splitting that would mean reclassifying `tsx` and `prisma` as runtime
+dependencies — defensible, since `npm ci --omit=dev && npm start` genuinely does not work today, but a change to
+the project's dependency contract rather than to its packaging.
+
+**Debian slim rather than Alpine.** Prisma resolves `native` engines at generation time; on Alpine that is the
+musl build, which needs extra compat packages and fails at *runtime* rather than at build time when they are
+missing. Debian costs ~40 MB and removes a class of problem that is hard to diagnose from a container log.
+
+</details>
+
+### Locally, with Node
+
 Requires **Node.js 22.12 or newer**. No `.env` file needed and no secrets anywhere — the database path is
 resolved to an absolute location in code, so the Prisma CLI and the running app cannot disagree about which
 file they are using.
@@ -492,6 +573,8 @@ three-minute and six-minute versions, plus a troubleshooting table.
 | `npm run db:migrate` | Apply the schema |
 | `npm run db:seed` | Regenerate the synthetic dataset from a seed |
 | `npm run db:reset` | Clear job state and unscore patients, keeping the same dataset |
+| `docker compose up --build` | Whole stack in containers, on http://localhost:8080 |
+| `docker compose down -v` | Stop the stack and delete its database volume |
 
 `db:seed` regenerates patients; `db:reset` keeps them and returns every record to an unscored baseline. See
 [`.env.example`](.env.example) for the tunable settings and their bounds — every bound is enforced
@@ -612,6 +695,10 @@ The full specification lives in [`.kiro/specs/backfillguard/`](.kiro/specs/backf
 shared/     Types, enums, simulation bounds, job transition table (single source of truth)
 backend/    Express API + simulation domain (engines, recovery, verification, scenario)
 frontend/   React dashboard, patient browser, comparison, verification report
+docker/     Container entrypoint and the nginx proxy config
 docs/       architecture.md · backfill-algorithm.md · demo-script.md
 .kiro/      Requirements, design and task specification
+
+Dockerfile          Two targets: `backend` and `frontend`
+docker-compose.yml  The full stack, published on :8080
 ```

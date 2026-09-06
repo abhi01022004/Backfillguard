@@ -1,0 +1,66 @@
+# Build context exclusions.
+#
+# Two reasons this file matters more than it looks:
+#
+#  1. `node_modules/` contains a native Prisma query engine compiled for the *host* OS. Copying it in
+#     would shadow the Linux engine generated inside the image, and the failure surfaces at runtime as
+#     an opaque "query engine could not be found" rather than at build time.
+#  2. `backend/data/` holds a real SQLite database. Baking it into an image would ship a snapshot of
+#     whatever happened to be on the machine that built it — including a half-finished run.
+
+# --- dependencies and build output ---
+node_modules
+**/node_modules
+dist
+**/dist
+build
+coverage
+**/coverage
+
+# --- generated Prisma client: regenerated inside the image for the target platform ---
+backend/src/generated
+
+# --- the database and its write-ahead files ---
+backend/data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# --- secrets and local environment ---
+.env
+.env.*
+!.env.example
+*.env
+
+# --- version control and tooling metadata ---
+.git
+.gitignore
+.gitattributes
+.github
+.kiro
+.vscode
+.idea
+
+# --- docs and local artefacts that do not belong in a runtime image ---
+docs
+*.md
+!README.md
+.shots
+*.log
+npm-debug.log*
+
+# --- test files: the image is for running the app, not the suite ---
+**/*.test.ts
+**/*.test.tsx
+**/vitest.config.ts
+frontend/src/test
+
+# --- OS noise ---
+.DS_Store
+Thumbs.db
+
+# --- docker's own files ---
+Dockerfile
+docker-compose*.yml
+.dockerignore

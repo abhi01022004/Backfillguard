@@ -1,0 +1,74 @@
+# BackfillGuard — full stack, one command.
+#
+#   docker compose up --build      then open http://localhost:8080
+#
+# Two services. `frontend` is the only one published: it serves the dashboard and proxies /api and
+# /live to `backend` over the internal network, which is why the browser sees a single origin and no
+# CORS preflight ever happens. The backend port is deliberately not published — nothing outside the
+# compose network needs to reach it directly, and exposing it would invite the dashboard to be pointed
+# at a different origin than the one it was built for.
+
+services:
+  backend:
+    build:
+      context: .
+      target: backend
+    image: backfillguard-backend:1.0.0
+    restart: unless-stopped
+
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      LOG_LEVEL: info
+
+      # Only consulted for cross-origin requests. nginx keeps the browser same-origin, so this is
+      # belt-and-braces rather than load-bearing — set to the published address for correctness.
+      CORS_ORIGIN: http://localhost:8080
+
+      # Left unset on purpose. The application resolves it to an absolute path inside the data
+      # directory below (see backend/src/config/databaseUrl.ts), which is the volume mount point, so
+      # the CLI and the running app cannot disagree about which file is the database.
+      # DATABASE_URL: file:/app/backend/data/backfillguard.db
+
+      # auto = seed only when the volume is new. `true` forces a reseed, `false` boots empty.
+      SEED_ON_START: auto
+
+      # The demo simulator: contacts no network, needs no credentials. An unrecognised value here
+      # degrades to demo with a warning rather than failing startup.
+      WHATSAPP_PROVIDER: demo
+
+      # Simulation defaults. Bounds are enforced by shared/, and an out-of-range value stops the
+      # process at startup rather than producing a quietly wrong run.
+      SIM_TOTAL_RECORDS: "1000"
+      SIM_PARTITION_COUNT: "10"
+
+    volumes:
+      # A *named* volume, not a bind mount. The image chowns this path to the `node` user before
+      # dropping privileges, and a named volume inherits that ownership on first use — a host bind
+      # mount would not, and the container would fail to write its own database.
+      - backfillguard-data:/app/backend/data
+
+    # No `ports:` — see the header note.
+    expose:
+      - "4000"
+
+  frontend:
+    build:
+      context: .
+      target: frontend
+    image: backfillguard-frontend:1.0.0
+    restart: unless-stopped
+
+    ports:
+      - "8080:80"
+
+    depends_on:
+      backend:
+        # Waits for the healthcheck, not merely for the container to exist. The backend applies
+        # migrations and seeds 1,000 records before it listens, so without this the first page load
+        # can land on a 502 and the dashboard renders its "cannot reach the backend" notice.
+        condition: service_healthy
+
+volumes:
+  backfillguard-data:
+    name: backfillguard-data
