@@ -15,6 +15,8 @@ import { createVerifyRouter } from './api/routes/verify';
 import { createCompareRouter } from './api/routes/compare';
 import { createEventRouter, type EventLogReader } from './api/routes/events';
 import { createScenarioRouter } from './api/routes/scenario';
+import { createNotificationRouter } from './api/routes/notifications';
+import type { NotificationService } from './domain/notification/NotificationService';
 import type { Clock } from './lib/clock';
 import type { OnlineUpdateSimulator } from './domain/online/OnlineUpdateSimulator';
 import type { ScenarioManager } from './domain/scenario/ScenarioManager';
@@ -26,6 +28,14 @@ export interface AppDeps {
   scenarios: ScenarioManager;
   clock: Clock;
   events: EventLogReader;
+  /**
+   * Optional, so every existing test harness that builds an app keeps compiling unchanged.
+   *
+   * The notification routes are only mounted when a service is supplied. That matches how the feature is wired
+   * elsewhere: opt-in at the composition root, absent by default, so nothing that does not ask for notifications
+   * has to know they exist.
+   */
+  notifications?: NotificationService;
   health?: HealthDeps;
 }
 
@@ -70,6 +80,16 @@ export function createApp(deps: AppDeps): Express {
     '/api/scenario',
     createScenarioRouter({ scenarios: deps.scenarios, orchestrator: deps.orchestrator }),
   );
+  if (deps.notifications) {
+    app.use(
+      '/api/notifications',
+      createNotificationRouter({
+        notifications: deps.notifications,
+        repository: deps.repository,
+      }),
+    );
+  }
+
   app.use(
     '/api/online-update',
     createOnlineUpdateRouter({

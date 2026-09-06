@@ -23,6 +23,10 @@ import { generatePatients } from '../infra/seed/patientGenerator';
 import { OnlineUpdateSimulator } from '../domain/online/OnlineUpdateSimulator';
 import { SimulationOrchestrator } from '../domain/orchestrator/SimulationOrchestrator';
 import { ScenarioManager } from '../domain/scenario/ScenarioManager';
+import { InMemoryNotificationRepository } from '../infra/repositories/InMemoryNotificationRepository';
+import { NotifyingPatientRepository } from '../infra/repositories/NotifyingPatientRepository';
+import { DemoWhatsAppProvider } from '../infra/notification/DemoWhatsAppProvider';
+import { NotificationService } from '../domain/notification/NotificationService';
 
 /**
  * The HTTP surface (R1.6, R22.4–R22.8, R23.1–R23.5).
@@ -50,6 +54,7 @@ interface Harness {
   app: Express;
   patients: InMemoryPatientRepository;
   orchestrator: SimulationOrchestrator;
+  notifications: NotificationService;
 }
 
 /**
@@ -78,8 +83,24 @@ async function makeHarness(
     );
   }
 
+  /**
+   * The notification stack, wired the same way the composition root wires it.
+   *
+   * The orchestrator is given the *wrapped* repository, so a backfill driven through the HTTP API produces real
+   * notifications by the same mechanism production uses. Building the harness with a plain repository and then
+   * testing notifications separately would have left the wiring itself — the part most likely to be wrong —
+   * unexercised.
+   */
+  const notificationStore = new InMemoryNotificationRepository();
+  const notifications = new NotificationService({
+    notifications: notificationStore,
+    provider: new DemoWhatsAppProvider(),
+    events,
+  });
+  const guardedPatients = new NotifyingPatientRepository(patients, notifications);
+
   const orchestrator = new SimulationOrchestrator({
-    patients,
+    patients: guardedPatients,
     jobs,
     events,
     clock,
@@ -116,16 +137,17 @@ async function makeHarness(
   });
 
   const app = createApp({
-    repository: patients,
+    repository: guardedPatients,
     orchestrator,
     onlineUpdates,
     scenarios,
     clock,
     events,
+    notifications,
     health: { probeDatabase: async () => ({ connected: true, patientCount: await patients.countAll() }) },
   });
 
-  return { app, patients, orchestrator };
+  return { app, patients, orchestrator, notifications };
 }
 
 describe('API: health and routing', () => {
@@ -606,5 +628,226 @@ describe('API: comparison, events and scenario', () => {
 
     await request(paced.app).post('/api/scenario/abort').expect(200);
     await request(paced.app).post('/api/reset').expect(200);
+  });
+});
+
+/**
+ * The notification HTTP surface.
+ *
+ * The claim these tests protect is narrow and important: **nothing a client can send causes a risk alert to be
+ * fabricated.** The only route that transmits anything is the explicitly-labelled test send, and it reports the
+ * patient's real recomputed risk rather than a chosen one. Status, provider id and dedup key are all rejected as
+ * input, so a caller cannot assert that an alert was delivered when it was not.
+ */
+describe('API: notifications', () => {
+  let harness: Harness;
+  beforeEach(async () => {
+    harness = await makeHarness();
+  });
+
+  it('lists nothing before a run, and says the provider is simulated', async () => {
+    const response = await request(harness.app).get('/api/notifications').expect(200);
+
+    expect(response.body.notifications).toEqual([]);
+    expect(response.body.provider).toEqual({ name: 'demo', simulated: true });
+    expect(response.body.disclaimer).toBeTruthy();
+  });
+
+  it('reports empty stats with a null success rate rather than a flattering 100%', async () => {
+    const response = await request(harness.app).get('/api/notifications/stats').expect(200);
+
+    expect(response.body.total).toBe(0);
+    expect(response.body.sent).toBe(0);
+    // Null is the honest answer when nothing was attempted; 100% would be a measurement of nothing.
+    expect(response.body.successRate).toBeNull();
+  });
+
+  it('produces sent alerts for the HIGH patients a completed run committed', async () => {
+    await harness.orchestrator.start({}, { autoAdvance: false });
+    await harness.orchestrator.runToCompletion();
+
+    const list = await request(harness.app).get('/api/notifications').expect(200);
+    const records = list.body.notifications as { status: string; riskLevel: string }[];
+
+    expect(records.length).toBeGreaterThan(0);
+
+    // Every alert from a clean run describes a HIGH result that was committed under its version guard.
+    expect(records.every((record) => record.riskLevel === RISK_LEVEL.HIGH)).toBe(true);
+    expect(records.every((record) => record.status === 'SENT')).toBe(true);
+
+    const stats = await request(harness.app).get('/api/notifications/stats').expect(200);
+    expect(stats.body.sent).toBe(records.length);
+    expect(stats.body.failed).toBe(0);
+    expect(stats.body.successRate).toBe(100);
+    expect(stats.body.highRiskPatients).toBeGreaterThan(0);
+  });
+
+  it('never sends an alert for a patient below the HIGH band', async () => {
+    await harness.orchestrator.start({}, { autoAdvance: false });
+    await harness.orchestrator.runToCompletion();
+
+    const low = await request(harness.app)
+      .get(`/api/notifications?riskLevel=${RISK_LEVEL.LOW}`)
+      .expect(200);
+    const medium = await request(harness.app)
+      .get(`/api/notifications?riskLevel=${RISK_LEVEL.MEDIUM}`)
+      .expect(200);
+
+    expect(low.body.notifications).toEqual([]);
+    expect(medium.body.notifications).toEqual([]);
+  });
+
+  it('filters by status and by patient code', async () => {
+    await harness.orchestrator.start({}, { autoAdvance: false });
+    await harness.orchestrator.runToCompletion();
+
+    const sent = await request(harness.app).get('/api/notifications?status=SENT').expect(200);
+    expect(sent.body.notifications.length).toBeGreaterThan(0);
+
+    const code = sent.body.notifications[0].patientCode as string;
+    const byCode = await request(harness.app)
+      .get(`/api/notifications?patientCode=${code}`)
+      .expect(200);
+
+    expect(byCode.body.notifications.length).toBeGreaterThan(0);
+    expect(
+      (byCode.body.notifications as { patientCode: string }[]).every(
+        (record) => record.patientCode === code,
+      ),
+    ).toBe(true);
+  });
+
+  it('serves one notification by id, including its full message body', async () => {
+    await harness.orchestrator.start({}, { autoAdvance: false });
+    await harness.orchestrator.runToCompletion();
+
+    const list = await request(harness.app).get('/api/notifications?limit=1').expect(200);
+    const id = list.body.notifications[0].id as number;
+
+    const response = await request(harness.app).get(`/api/notifications/${id}`).expect(200);
+
+    expect(response.body.notification.id).toBe(id);
+    expect(response.body.notification.message).toBeTruthy();
+    // The disclaimer travels in the message body itself, not only alongside it.
+    expect(response.body.notification.message.toLowerCase()).toContain('synthetic');
+    expect(response.body.notification.recipient).toMatch(/^\+91 90000\d{5}$/);
+  });
+
+  it('returns a structured 404 for an unknown notification id', async () => {
+    const response = await request(harness.app).get('/api/notifications/999999').expect(404);
+
+    expect(response.body.error.code).toBe(ERROR_CODE.NOT_FOUND);
+  });
+
+  it('rejects a malformed id and an unknown filter', async () => {
+    await request(harness.app).get('/api/notifications/not-a-number').expect(400);
+    await request(harness.app).get('/api/notifications?status=DELIVERED').expect(400);
+    await request(harness.app).get('/api/notifications?somethingElse=1').expect(400);
+    await request(harness.app).get('/api/notifications?limit=99999').expect(400);
+  });
+
+  // ---------------------------------------------------------------- the manual test send
+
+  it('sends a test alert reporting the patient\u2019s real current risk', async () => {
+    const response = await request(harness.app)
+      .post('/api/notifications/test')
+      .send({})
+      .expect(201);
+
+    const record = response.body.notification;
+
+    expect(record.status).toBe('SENT');
+    expect(record.reason).toBe('MANUAL_TEST');
+    expect(record.providerMessageId).toMatch(/^DEMO-WA-\d{6}$/);
+    expect(response.body.provider).toEqual({ name: 'demo', simulated: true });
+
+    // The figures are recomputed from the record, not chosen by the caller.
+    const patient = await harness.patients.findById(record.patientId);
+    expect(record.patientVersion).toBe(patient!.version);
+  });
+
+  it('files manual tests under their own job so they cannot inflate a run\u2019s figures', async () => {
+    await harness.orchestrator.start({}, { autoAdvance: false });
+    await harness.orchestrator.runToCompletion();
+
+    const jobId = (await request(harness.app).get('/api/backfill/state').expect(200)).body.jobId;
+    const before = await request(harness.app)
+      .get(`/api/notifications/stats?jobId=${jobId}`)
+      .expect(200);
+
+    await request(harness.app).post('/api/notifications/test').send({}).expect(201);
+
+    const after = await request(harness.app)
+      .get(`/api/notifications/stats?jobId=${jobId}`)
+      .expect(200);
+
+    // The run's own statistics are unchanged: they are evidence about the backfill, not about button presses.
+    expect(after.body.sent).toBe(before.body.sent);
+    expect(after.body.total).toBe(before.body.total);
+  });
+
+  it('accepts a specific patient and 404s an unknown one', async () => {
+    const first = await request(harness.app).get('/api/patients?pageSize=1').expect(200);
+    const code = first.body.items[0].patientCode as string;
+
+    const response = await request(harness.app)
+      .post('/api/notifications/test')
+      .send({ patientCode: code })
+      .expect(201);
+
+    expect(response.body.notification.patientCode).toBe(code);
+
+    await request(harness.app)
+      .post('/api/notifications/test')
+      .send({ patientCode: 'P999999' })
+      .expect(404);
+  });
+
+  it('refuses a test send that tries to dictate the outcome', async () => {
+    // The whole point of the feature is that status is a consequence of a guarded write, never an input.
+    await request(harness.app)
+      .post('/api/notifications/test')
+      .send({ status: 'SENT' })
+      .expect(400);
+
+    await request(harness.app)
+      .post('/api/notifications/test')
+      .send({ riskLevel: RISK_LEVEL.HIGH, riskScore: 99 })
+      .expect(400);
+
+    await request(harness.app)
+      .post('/api/notifications/test')
+      .send({ providerMessageId: 'DEMO-WA-000001' })
+      .expect(400);
+
+    await request(harness.app)
+      .post('/api/notifications/test')
+      .send({ idempotencyKey: 'forged' })
+      .expect(400);
+  });
+
+  it('repeated test sends each produce their own record', async () => {
+    const first = await request(harness.app).post('/api/notifications/test').send({}).expect(201);
+    const second = await request(harness.app).post('/api/notifications/test').send({}).expect(201);
+
+    // Salted keys, so a manual press can neither collide with nor suppress a genuine alert.
+    expect(second.body.notification.id).not.toBe(first.body.notification.id);
+    expect(second.body.notification.idempotencyKey).not.toBe(
+      first.body.notification.idempotencyKey,
+    );
+  });
+
+  it('clears notifications on reset', async () => {
+    await harness.orchestrator.start({}, { autoAdvance: false });
+    await harness.orchestrator.runToCompletion();
+
+    expect(
+      (await request(harness.app).get('/api/notifications').expect(200)).body.notifications.length,
+    ).toBeGreaterThan(0);
+
+    await request(harness.app).post('/api/reset').expect(200);
+
+    const after = await request(harness.app).get('/api/notifications').expect(200);
+    expect(after.body.notifications).toEqual([]);
   });
 });

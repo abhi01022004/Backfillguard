@@ -142,6 +142,7 @@ async function start(): Promise<void> {
     scenarios,
     clock,
     events: persistedSink,
+    notifications,
     health: { probeDatabase: createDatabaseProbe(prisma) },
   });
 
