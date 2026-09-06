@@ -111,6 +111,10 @@ backend/src/infra/     Adapters: Prisma repositories, Socket.IO transport, seedi
 shared/                Types, enums, bounds, job transition table — imported by both sides
 ```
 
+→ **[docs/architecture-diagram.md](docs/architecture-diagram.md)** — the whole design as annotated diagrams,
+from a one-page overview to the version guard, the ledgers and the container layout. Start there if you would
+rather see it than read it.
+
 The simulation core depends only on injected ports (`PatientRepository`, `JobRepository`, `EventSink`,
 `NotificationRepository`, `WhatsAppProvider`), so the same engines run against SQLite in the application and
 against in-memory stores in tests and in the naive comparison. Both repository adapters are held to **one shared contract test suite**, because if their
@@ -682,6 +686,11 @@ branch in `selectWhatsAppProvider` — nothing in the domain, the engines or the
 
 ## Specification
 
+Diagrams: [architecture-diagram.md](docs/architecture-diagram.md) ·
+prose: [architecture.md](docs/architecture.md) ·
+[backfill-algorithm.md](docs/backfill-algorithm.md) ·
+[demo-script.md](docs/demo-script.md)
+
 The full specification lives in [`.kiro/specs/backfillguard/`](.kiro/specs/backfillguard/):
 [requirements](.kiro/specs/backfillguard/requirements.md) ·
 [design](.kiro/specs/backfillguard/design.md) ·
@@ -696,7 +705,7 @@ shared/     Types, enums, simulation bounds, job transition table (single source
 backend/    Express API + simulation domain (engines, recovery, verification, scenario)
 frontend/   React dashboard, patient browser, comparison, verification report
 docker/     Container entrypoint and the nginx proxy config
-docs/       architecture.md · backfill-algorithm.md · demo-script.md
+docs/       architecture-diagram.md · architecture.md · backfill-algorithm.md · demo-script.md
 .kiro/      Requirements, design and task specification
 
 Dockerfile          Two targets: `backend` and `frontend`
