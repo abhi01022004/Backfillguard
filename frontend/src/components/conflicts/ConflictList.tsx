@@ -45,7 +45,13 @@ export function ConflictList({
   return (
     <section
       aria-labelledby="conflicts-heading"
-      className="flex min-h-0 flex-col rounded-xl border border-slate-200 bg-white shadow-sm"
+      /*
+       * `h-full` so the height cap its container sets is actually inherited.
+       *
+       * Without it the flex column sizes to its content and the inner `overflow-y-auto` never engages —
+       * the list scrolls the page instead of scrolling itself.
+       */
+      className="flex h-full min-h-0 flex-col rounded-xl border border-slate-200 bg-white shadow-sm"
     >
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-5 py-3.5">
         <h2

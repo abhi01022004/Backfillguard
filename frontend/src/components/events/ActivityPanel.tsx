@@ -106,7 +106,14 @@ export function ActivityPanel({
         id="panel-conflicts"
         aria-labelledby="tab-conflicts"
         hidden={tab !== 'conflicts'}
-        className="max-h-[30rem] min-h-0"
+        /*
+         * `overflow-hidden` is load-bearing, not decoration.
+         *
+         * `max-h` alone does not contain the child: the panel inside grows to its natural height and simply
+         * paints over whatever follows it on the page. With eight conflict cards that is roughly 470px of
+         * overspill, which silently collided with the sections below.
+         */
+        className="max-h-[30rem] min-h-0 overflow-hidden"
       >
         <ConflictList
           conflicts={conflicts}
@@ -124,7 +131,7 @@ export function ActivityPanel({
         id="panel-events"
         aria-labelledby="tab-events"
         hidden={tab !== 'events'}
-        className="max-h-[30rem] min-h-0"
+        className="max-h-[30rem] min-h-0 overflow-hidden"
       >
         <EventTimeline events={events} />
       </div>

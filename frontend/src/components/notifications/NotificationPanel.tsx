@@ -154,7 +154,15 @@ export function NotificationPanel({ notifications, onSelectPatient }: Notificati
 
       <div className="grid gap-3 xl:grid-cols-5">
         <div className="min-w-0 xl:col-span-3">
-          <div className="flex max-h-[26rem] min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          {/*
+            * Both columns share one height cap so the row cannot end up ragged.
+            *
+            * 34rem rather than something smaller because the simulator beside this has to fit a full message
+            * body *and* its metadata — the provider id, source version and idempotency key are the evidence the
+            * panel exists to show, and a cap that hid them below a scroll line defeated the point. At 26rem the
+            * card was cut mid-sentence, which read as a rendering fault rather than as a scroll region.
+            */}
+          <div className="flex max-h-[34rem] min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             {error ? (
               <p className="px-5 py-6 text-sm text-rose-700">{error}</p>
             ) : loading && records.length === 0 ? (
@@ -182,7 +190,7 @@ export function NotificationPanel({ notifications, onSelectPatient }: Notificati
         </div>
 
         <div className="min-w-0 xl:col-span-2">
-          <div className="max-h-[26rem]">
+          <div className="max-h-[34rem] min-h-0 overflow-hidden">
             <MessageSimulator
               record={selected}
               providerName={provider?.name ?? null}
