@@ -9,6 +9,7 @@ import {
 import { useLiveStream } from '../hooks/useLiveStream';
 import { useVerificationReport } from '../hooks/useVerificationReport';
 import { useConflicts } from '../hooks/useConflicts';
+import { useNotifications } from '../hooks/useNotifications';
 import { useCheckpoint } from '../hooks/useCheckpoint';
 import { useScenario } from '../hooks/useScenario';
 import { useRecovery } from '../hooks/useRecovery';
@@ -26,6 +27,8 @@ import { ProgressPanel } from '../components/backfill/ProgressPanel';
 import { PartitionGrid } from '../components/backfill/PartitionGrid';
 import { RecoveryTimeline } from '../components/backfill/RecoveryTimeline';
 import { ActivityPanel } from '../components/events/ActivityPanel';
+import { NotificationKpis } from '../components/notifications/NotificationKpis';
+import { NotificationPanel } from '../components/notifications/NotificationPanel';
 import { navigate, ROUTES } from '../routes';
 
 /**
@@ -47,6 +50,8 @@ import { navigate, ROUTES } from '../routes';
  * 4. **Four KPI cards** — the counts.
  * 5. **Verdict** and **recovery timeline** — the proof and the narrative.
  * 6. **Activity / conflicts** tabbed, beside the run detail and partition grid — the corroborating detail.
+ * 7. **Risk alerts** — the outbound side effect, last, because it only means something once the guard above it
+ *    has been shown to work.
  *
  * Controls and settings live in a drawer behind the status strip's button. The run keeps going while it is
  * open, and the strip stays visible, so pausing or crashing the job never means losing sight of it.
@@ -58,6 +63,7 @@ export function Dashboard() {
   const { status, job, events, resync } = useLiveStream();
   const { report, loaded: reportLoaded } = useVerificationReport(events);
   const conflicts = useConflicts(events);
+  const notifications = useNotifications(events);
   const checkpoint = useCheckpoint(events);
   const { scenario, error: scenarioError } = useScenario(events);
   const { recovery } = useRecovery(events);
@@ -132,6 +138,21 @@ export function Dashboard() {
             <PartitionGrid job={job} currentPartition={job?.metrics?.currentPartition ?? null} />
           </div>
         </div>
+
+        {/*
+          * Notifications sit after the safety story rather than above it.
+          *
+          * They are the newest feature and the most eye-catching, which is exactly why they are not at the top:
+          * the alerts are a *consequence* of the version guard, and they only mean anything once the viewer has
+          * seen the conflicts and the verdict that make them trustworthy. Leading with them would sell the demo
+          * and bury the argument.
+          */}
+        <NotificationKpis stats={notifications.stats} loaded={!notifications.loading} />
+
+        <NotificationPanel
+          notifications={notifications}
+          onSelectPatient={(code) => navigate(ROUTES.patients, { code })}
+        />
 
         <p className="pb-2 text-center text-xs text-slate-500">{DISCLAIMER.LONG}</p>
       </div>

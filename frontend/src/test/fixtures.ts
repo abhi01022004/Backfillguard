@@ -5,6 +5,9 @@ import {
   DEFAULT_SIMULATION_SETTINGS,
   DIAGNOSIS,
   JOB_STATUS,
+  NOTIFICATION_CHANNEL,
+  NOTIFICATION_REASON,
+  NOTIFICATION_STATUS,
   PARTITION_STATE,
   RISK_LEVEL,
   VERIFICATION_CHECK,
@@ -12,6 +15,8 @@ import {
   type BackfillJobState,
   type ConflictRecord,
   type JobMetrics,
+  type NotificationRecord,
+  type NotificationStats,
   type PartitionProgress,
   type Patient,
   type SimulationEvent,
@@ -188,6 +193,54 @@ export function makeEvent(overrides: Partial<SimulationEvent> = {}): SimulationE
     message: 'P0001 scored 48 (MEDIUM).',
     jobId: 'BG-DEMO-001',
     createdAt: '2026-09-05T10:00:00.000Z',
+    ...overrides,
+  };
+}
+
+/**
+ * A risk notification.
+ *
+ * Defaults to the interesting case — a `SENT` alert for a HIGH result — because that is what most assertions
+ * are about, and the cases that differ (cancelled, failed, queued) then read as one explicit override rather
+ * than five.
+ */
+export function makeNotification(
+  overrides: Partial<NotificationRecord> = {},
+): NotificationRecord {
+  return {
+    id: 1,
+    jobId: 'JOB-1',
+    patientId: 42,
+    patientCode: 'P0042',
+    patientVersion: 3,
+    riskScore: 82,
+    riskLevel: RISK_LEVEL.HIGH,
+    channel: NOTIFICATION_CHANNEL.WHATSAPP,
+    status: NOTIFICATION_STATUS.SENT,
+    message: 'BackfillGuard risk alert\nPatient P0042 scored 82 (HIGH) at v3.\nSynthetic data.',
+    recipient: '+91 9000000042',
+    providerMessageId: 'DEMO-WA-000001',
+    reason: NOTIFICATION_REASON.HIGH_RISK_DETECTED,
+    idempotencyKey: 'JOB-1:42:3:HIGH',
+    createdAt: '2026-01-01T09:00:00.000Z',
+    sentAt: '2026-01-01T09:00:00.000Z',
+    cancelledAt: null,
+    failureReason: null,
+    ...overrides,
+  };
+}
+
+export function makeNotificationStats(
+  overrides: Partial<NotificationStats> = {},
+): NotificationStats {
+  return {
+    total: 4,
+    highRiskPatients: 3,
+    queued: 0,
+    sent: 3,
+    cancelled: 1,
+    failed: 0,
+    successRate: 100,
     ...overrides,
   };
 }
