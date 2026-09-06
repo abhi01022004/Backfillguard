@@ -207,6 +207,52 @@ describe('NotifyingPatientRepository', () => {
     expect(cancelled[0]!.patientVersion).toBe(staleVersion);
   });
 
+  it('cancels a queued alert when re-evaluation drops the record below HIGH', async () => {
+    const patient = await target(0);
+    const staleVersion = patient.version;
+
+    await repository.stagePendingResults([stagedFor(patient, HIGH)]);
+    expect((await service.list({}))[0]!.status).toBe(NOTIFICATION_STATUS.QUEUED);
+
+    await bumpVersion(patient);
+
+    /**
+     * The commit that supersedes it is MEDIUM, so there is no replacement alert to create.
+     *
+     * This is the branch that a "return early unless HIGH" implementation misses: the queued row would sit at
+     * QUEUED forever, never sent but never counted as prevented either — so the dashboard would understate
+     * the protection the guard actually gave.
+     */
+    const current = (await inner.findById(patient.id))!;
+    const applied = await repository.applyGuarded(patient.id, current.version, MEDIUM, {
+      ...LEDGER,
+      phase: 'RECOVERY',
+    });
+
+    expect(applied.applied).toBe(true);
+    expect(await sentCount()).toBe(0);
+
+    const records = await service.list({});
+    expect(records).toHaveLength(1);
+    expect(records[0]!.status).toBe(NOTIFICATION_STATUS.CANCELLED);
+    expect(records[0]!.patientVersion).toBe(staleVersion);
+  });
+
+  it('does not cancel the queued row it is about to promote', async () => {
+    const patient = await target(1);
+
+    await repository.stagePendingResults([stagedFor(patient, HIGH)]);
+    const queuedId = (await service.list({}))[0]!.id;
+
+    // Committed at the same version it was staged from: this row is the one being sent, not superseded.
+    await repository.applyGuarded(patient.id, patient.version, HIGH, LEDGER);
+
+    const records = await service.list({});
+    expect(records).toHaveLength(1);
+    expect(records[0]!.id).toBe(queuedId);
+    expect(records[0]!.status).toBe(NOTIFICATION_STATUS.SENT);
+  });
+
   // ---------------------------------------------------------------- duplicate suppression
 
   it('does not send twice when the same result is committed again at the same version', async () => {

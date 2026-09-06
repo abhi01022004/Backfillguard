@@ -158,10 +158,41 @@ export class NotifyingPatientRepository implements PatientRepository {
     derived: DerivedFields,
     phase: string,
   ): Promise<void> {
-    if (derived.riskLevel !== RISK_LEVEL.HIGH) return;
+    /**
+     * Supersede first, then alert.
+     *
+     * A commit at this version makes any queued alert for this patient at a *different* version obsolete, and
+     * that has to be handled before the risk band is considered — because the case where re-evaluation drops a
+     * record out of HIGH is precisely the case where there is a stale alert to cancel and no new one to send.
+     * Returning early on a non-HIGH result would leave that row queued forever.
+     *
+     * This is also what closes the recovery path: recovery rejects a stale staged result without attempting a
+     * write, so no refusal fires, and the subsequent re-evaluated commit is the only signal that the queued
+     * alert has been superseded.
+     *
+     * The cost is one indexed lookup per applied write. That is a real cost on a large run and it buys
+     * correctness on the path most likely to be wrong, which is the right trade — an alert stuck at QUEUED
+     * would make the dashboard understate the protection the guard actually provided.
+     */
+    const queued = await this.notifications.queuedForPatient(jobId, patientId);
+    const hasObsolete = queued.some((row) => row.patientVersion !== committedVersion);
+
+    if (!hasObsolete && derived.riskLevel !== RISK_LEVEL.HIGH) return;
 
     const patient = await this.inner.findById(patientId);
     if (!patient) return;
+
+    if (hasObsolete) {
+      await this.notifications.onSuperseded({
+        jobId,
+        patientId,
+        patientCode: patient.patientCode,
+        partitionIndex: patient.partitionIndex,
+        committedVersion,
+      });
+    }
+
+    if (derived.riskLevel !== RISK_LEVEL.HIGH) return;
 
     /**
      * Phase distinguishes provenance, not eligibility.

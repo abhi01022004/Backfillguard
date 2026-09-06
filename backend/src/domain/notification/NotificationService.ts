@@ -282,6 +282,84 @@ export class NotificationService {
     return this.deps.notifications.queuedForPatient(jobId, patientId);
   }
 
+  // ------------------------------------------------------------------ superseded by a later commit
+
+  /**
+   * Cancels queued alerts for a patient that a commit at `committedVersion` has made obsolete.
+   *
+   * ## Why this exists in addition to `onRefused`
+   *
+   * `onRefused` covers the case where a stale write was *attempted* and the database rejected it. But recovery
+   * catches some staleness earlier than that: it compares a staged result's source version against the row and,
+   * on a mismatch, marks the staged row `REJECTED` and routes straight to re-evaluation. No write is attempted,
+   * so no refusal ever happens — and without this method the queued alert from that staged result would sit at
+   * `QUEUED` forever, never sent but never visibly prevented either.
+   *
+   * That gap was found by an integration test driving a real crash with a clinical edit during the outage: the
+   * alert stayed `QUEUED` and the cancelled count stayed at zero, which would have made the dashboard claim no
+   * stale alert had been prevented in exactly the scenario where one had.
+   *
+   * ## Why it keys on the version rather than cancelling everything
+   *
+   * A commit at v3 must *not* cancel the queued row for v3 — that row is the one being promoted to `SENT`. Only
+   * rows computed from some other version are obsolete. Expressing it as "any version but this one" also covers
+   * the case where re-evaluation drops the record below HIGH: the commit cancels the stale alert and creates no
+   * replacement, which is the correct outcome and would otherwise have been missed.
+   */
+  async onSuperseded(params: {
+    jobId: string;
+    patientId: number;
+    patientCode: string;
+    partitionIndex?: number;
+    /** The version that was just committed under a guard. */
+    committedVersion: number;
+  }): Promise<NotificationRecord[]> {
+    try {
+      const queued = await this.deps.notifications.queuedForPatient(params.jobId, params.patientId);
+      const obsolete = queued.filter((row) => row.patientVersion !== params.committedVersion);
+      if (obsolete.length === 0) return [];
+
+      const cancelled: NotificationRecord[] = [];
+
+      for (const row of obsolete) {
+        const record = await this.deps.notifications.markCancelled(
+          row.id,
+          NOTIFICATION_REASON.STALE_NOTIFICATION_CANCELLED,
+        );
+        cancelled.push(record);
+
+        this.deps.events.emit({
+          type: EVENT_TYPE.NOTIFICATION_CANCELLED,
+          severity: EVENT_SEVERITY.WARNING,
+          jobId: params.jobId,
+          patientCode: params.patientCode,
+          ...(params.partitionIndex === undefined ? {} : { partitionIndex: params.partitionIndex }),
+          message:
+            `Risk alert for ${params.patientCode} cancelled before sending: it was computed from ` +
+            `v${row.patientVersion}, and the result committed for this record was v${params.committedVersion}. ` +
+            `A stale alert was prevented.`,
+          payload: {
+            ...this.payload(record),
+            staleVersion: row.patientVersion,
+            currentVersion: params.committedVersion,
+          },
+        });
+      }
+
+      return cancelled;
+    } catch (error) {
+      this.reportInternalFailure('cancel', {
+        jobId: params.jobId,
+        patientId: params.patientId,
+        patientCode: params.patientCode,
+        patientVersion: params.committedVersion,
+        riskScore: 0,
+        riskLevel: null,
+      }, error);
+      return [];
+    }
+  }
+
   // ------------------------------------------------------------------ lifecycle
 
   /**
