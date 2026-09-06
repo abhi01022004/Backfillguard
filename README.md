@@ -12,6 +12,9 @@ destroys the job's checkpoint, and then *prove* that nothing newer was overwritt
 > clinical decision-support system, and it must **never** be used for any medical purpose. No real or
 > re-identifiable patient information is present anywhere in this repository. No claim of clinical validity is
 > made anywhere in this codebase or its documentation.
+>
+> The WhatsApp risk alerts are **simulated**. No message is ever transmitted, no phone number in this project
+> belongs to anyone, and no credentials exist anywhere in the repository or are required to run it.
 
 ---
 
@@ -26,10 +29,11 @@ destroys the job's checkpoint, and then *prove* that nothing newer was overwritt
 7. [The version-control mechanism](#7-the-version-control-mechanism)
 8. [Recovery strategy](#8-recovery-strategy)
 9. [Verification guarantees](#9-verification-guarantees)
-10. [Running the demo](#10-running-the-demo)
-11. [Testing](#11-testing)
-12. [Limitations and what is simulated](#12-limitations-and-what-is-simulated)
-13. [Healthcare disclaimer](#healthcare-disclaimer)
+10. [WhatsApp risk notifications](#10-whatsapp-risk-notifications)
+11. [Running the demo](#11-running-the-demo)
+12. [Testing](#12-testing)
+13. [Limitations and what is simulated](#13-limitations-and-what-is-simulated)
+14. [Healthcare disclaimer](#healthcare-disclaimer)
 
 ---
 
@@ -103,13 +107,13 @@ frontend/   React 19 · Vite · Tailwind 4        Dashboard · Patients · Compa
    │ HTTP + Socket.IO
 backend/src/api/       Express 5 routers, zod schemas, error envelope, request logging
 backend/src/domain/    The simulation. Imports no Prisma, no Express, no Socket.IO.
-backend/src/infra/     Adapters: Prisma repositories, Socket.IO transport, seeding
+backend/src/infra/     Adapters: Prisma repositories, Socket.IO transport, seeding, messaging provider
 shared/                Types, enums, bounds, job transition table — imported by both sides
 ```
 
-The simulation core depends only on injected ports (`PatientRepository`, `JobRepository`, `EventSink`), so the
-same engines run against SQLite in the application and against in-memory stores in tests and in the naive
-comparison. Both repository adapters are held to **one shared contract test suite**, because if their
+The simulation core depends only on injected ports (`PatientRepository`, `JobRepository`, `EventSink`,
+`NotificationRepository`, `WhatsAppProvider`), so the same engines run against SQLite in the application and
+against in-memory stores in tests and in the naive comparison. Both repository adapters are held to **one shared contract test suite**, because if their
 semantics drift then every conclusion the tests reach about safety stops applying to the running system.
 
 Everything is dispatched from a **single tick loop**. Nothing else in the domain owns a timer, and a guard test
@@ -298,7 +302,152 @@ words rather than flagged as a fault.
 
 ---
 
-## 10. Running the demo
+## 10. WhatsApp risk notifications
+
+An outbound side effect attached to a concurrent backfill. The point is not that messages can be sent — it is
+that **an alert is transmitted only for a result committed under a version guard**, so a doctor's edit landing
+mid-computation can never produce an alert about data the record has already moved past.
+
+### Where it hooks in, and why there
+
+Every safe commit in the system already funnels through one method: `PatientRepository.applyGuarded`. Four
+places call it — the initial pass, conflict re-evaluation, and two paths in recovery — and the naive comparison
+engine deliberately does not, because it writes through `applyUnguardedWholeRow`.
+
+So the observation point is the **port**, not the callers. `NotifyingPatientRepository` decorates the
+repository and is wired only in the composition root:
+
+```
+BackfillEngine ─┐
+ConflictEngine ─┼─► NotifyingPatientRepository ─► PrismaPatientRepository
+RecoveryEngine ─┘            │
+                             └─► NotificationService ─► DemoWhatsAppProvider
+
+NaiveBackfillEngine ─────────────► applyUnguardedWholeRow   (no alerts, by construction)
+```
+
+That buys four things: no engine is modified, so the concurrency logic this project is about carries no
+notification code; all four commit paths are covered at once, including any added later; the naive engine is
+excluded automatically; and tests get a plain repository unless they ask for notifications.
+
+### Lifecycle
+
+| Status | When | Transmitted? |
+|---|---|---|
+| `QUEUED` | A HIGH result is computed and staged, before any write | **No** |
+| `SENT` | A guarded write applied — the row matched the version the score came from | Yes |
+| `CANCELLED` | The result was superseded before it could be sent | **No** |
+| `FAILED` | The provider rejected it | No, and reported |
+
+**There is no `DELIVERED` status.** The demo provider never contacts a network, so it cannot know whether
+anything was delivered. A `DELIVERED` row would be a fabricated measurement — the same reason an unmeasured KPI
+renders as "—" rather than a plausible zero. A real provider can add the state alongside the webhook that would
+justify it.
+
+**Why `QUEUED` exists.** The simpler design creates nothing until a commit succeeds. It is equally safe and it
+makes the safety mechanism *invisible*: a stale result leaves no trace, so the dashboard can only show an
+absence and ask you to believe an alert was avoided. Creating a `QUEUED` row first means a superseded result
+leaves a `CANCELLED` row naming the patient, the stale version and the version that replaced it.
+
+Two distinct paths produce a cancellation, and both are needed:
+
+- the version guard **refuses** a write (`applied = false`), or
+- a later commit at a different version **supersedes** the queued row.
+
+The second was found by an integration test, not by design. Recovery rejects a stale staged result and routes
+straight to re-evaluation *without attempting a write* — so no refusal ever fires, and without the supersede
+path the alert would have sat at `QUEUED` forever: never sent, but never counted as prevented either.
+
+**Duplicate suppression is a database constraint**, not a check that has to remember to run. The key is
+`jobId:patientId:version:riskLevel` under a unique index. Including the version is what makes it correct across
+recovery, which deliberately revisits records: the same patient committed twice at the same version is the same
+fact and must alert once, while a genuinely new version is a new fact and should alert again.
+
+### Phone numbers are derived, never stored
+
+`+91 90000` followed by the zero-padded patient id. The patient schema is untouched, nothing phone-shaped is
+ever persisted, and the value is deterministic so the same patient always shows the same number. The prefix is
+inside a documented test range and the number is visibly sequential, so it reads as obviously fabricated.
+
+### The provider
+
+`WHATSAPP_PROVIDER` defaults to `demo`, the only implementation. It opens no socket, reads no credential and
+imports no HTTP client — which is why this runs on a fresh laptop with no account, no API key and no network.
+An unrecognised value falls back to `demo` with a warning rather than failing startup: a typo in configuration
+should degrade to the provider that cannot contact anyone.
+
+Every API response carries `provider.simulated`, the message ids are prefixed `DEMO-WA-`, and the message body
+itself says nothing was transmitted. A simulator that presented identically to a real integration would be
+indistinguishable from a real one that was quietly broken.
+
+Credential placeholders in `.env.example` are commented out on purpose: nothing reads them, and the project
+must stay runnable with no secrets present.
+
+### API
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/notifications` | List, filterable by `status`, `riskLevel`, `patientCode`, `jobId` |
+| `GET /api/notifications/:id` | One alert, including its exact message body |
+| `GET /api/notifications/stats` | Counts; `successRate` excludes cancelled from the denominator |
+| `POST /api/notifications/test` | The dashboard's test send |
+
+Nothing a client sends can fabricate an alert. `status`, `riskScore`, `providerMessageId` and
+`idempotencyKey` are absent from every request schema, so a caller cannot assert that a message was delivered
+when it was not. `POST /test` is explicitly a *test*: recorded with a `MANUAL_TEST` reason, filed under a
+separate job id so a button press cannot inflate a run's figures, and it reports the patient's live recomputed
+risk rather than inventing a HIGH score.
+
+`successRate` excludes `CANCELLED` because a cancellation is the safety mechanism working, not a delivery
+failure — folding it in would make the version guard look like unreliability. It is `null`, not 100%, when
+nothing has been attempted.
+
+### Verification treats this as advisory, not as a verdict
+
+The report gains a separate `advisory` section with `staleNotifications` and `duplicateNotifications`. It is
+deliberately **not** a seventh check, and it **cannot** change `VERIFIED_SAFE`.
+
+The verdict is a statement about patient data. Folding notification defects in would let a fault in a demo
+messaging simulator turn a run whose data was provably correct into `VERIFICATION_FAILED`, and a reader seeing
+red would reasonably conclude data had been corrupted. The separation is structural: `passed` is computed from
+`checks` alone, before the advisory is measured.
+
+It is still measured independently. A `SENT` alert is counted stale unless the write ledger holds an **applied**
+entry for the same patient whose `guardVersion` equals the alert's source version — a join across two tables
+written by different code paths, so a notification layer that lied about a commit is detectable. Duplicates are
+found by *rebuilding* the dedup key from each row's own fields rather than reading the stored key, so a
+mis-keyed row is still caught; counting distinct stored keys would only have proved the column is unique.
+
+A non-zero anomaly emits a `CRITICAL` event — loud, but not verdict-changing.
+
+### What the scripted demo actually produced
+
+From a live 1,000-record run (`POST /api/scenario/demo`):
+
+```
+verdict          VERIFIED_SAFE      coverage 100%      staleOverwrites 0
+conflicts        11                 reevaluated 11     staleWritesBlocked 11
+
+alerts sent      410                = exactly the 410 HIGH-risk patients
+cancelled        1                  the nurse's edit during the outage
+queuedAtEnd      0    failed 0      staleNotifications 0    duplicates 0
+```
+
+The single cancellation is the whole feature in one record. Patient `P0221` scored 78 (HIGH) at `v1`; the
+result was staged; the process crashed; a nurse updated the record to `v2` during the outage. Recovery refused
+the stale result, so the `v1` alert was **cancelled and never transmitted** (no provider id), and the
+re-evaluated result at `v2` — score 83 — was sent instead, with reason `HIGH_RISK_RECALCULATED`:
+
+```
+SENT      v2  score=83  HIGH_RISK_RECALCULATED         providerId=DEMO-WA-000092
+CANCELLED v1  score=78  STALE_NOTIFICATION_CANCELLED   providerId=(none)
+```
+
+A naive implementation would have sent the `v1` alert.
+
+---
+
+## 11. Running the demo
 
 Requires **Node.js 22.12 or newer**. No `.env` file needed and no secrets anywhere — the database path is
 resolved to an absolute location in code, so the Prisma CLI and the running app cannot disagree about which
@@ -350,10 +499,10 @@ server-side, independently of the client.
 
 ---
 
-## 11. Testing
+## 12. Testing
 
 ```bash
-npm test          # 506 tests, non-watch: 396 backend + 110 frontend
+npm test          # 632 tests, non-watch: 479 backend + 153 frontend
 npm run typecheck # all three workspaces
 ```
 
@@ -372,7 +521,7 @@ The suite is structured around what could actually go wrong rather than around c
 - **Determinism tests** covering both fresh-process and *repeated-in-one-process* replay. The second is the
   one that was actually broken: four consecutive live runs reported 6, 8, 7 and 7 conflicts before the RNG and
   the dataset were reset per run.
-- **41 API tests** over HTTP, asserting that `riskScore`, `riskLevel`, `version`, `lastBackfillVersion` and
+- **55 API tests** over HTTP, asserting that `riskScore`, `riskLevel`, `version`, `lastBackfillVersion` and
   `age` are *rejected* rather than merely ineffective — a schema that stripped them would pass an
   effect-based test while advertising a surface that is not there.
 - **Two source-level guard tests.** One fails the build if `Math.random()`, `Date.now()`, `new Date()`,
@@ -381,10 +530,17 @@ The suite is structured around what could actually go wrong rather than around c
   a fast machine and fails intermittently on a slow one.
 - **A repository-hygiene test** asserting no `.env`, database file, generated client, native binary,
   credential-shaped string or absolute local user path is ever tracked.
+- **Notification tests at three levels**, because they fail differently at each. Unit tests on the decorator
+  assert the guarantee directly by moving a version on purpose. Integration tests drive a real crash, a
+  clinical edit during the outage and evidence-based recovery through the orchestrator — which is what found
+  the supersede gap the unit tests could not see, since it depended on a path the engines take and the unit
+  tests set up by hand. Falsifiability tests forge an alert at a version that never committed and a duplicate
+  whose stored key is unique, then assert the advisory catches both *and* that the verdict stays
+  `VERIFIED_SAFE`.
 
 ---
 
-## 12. Limitations and what is simulated
+## 13. Limitations and what is simulated
 
 Stated plainly, because a demo that blurs this line is not worth trusting.
 
@@ -398,6 +554,8 @@ Stated plainly, because a demo that blurs this line is not worth trusting.
 | The crash (a button) | A pod eviction, OOM kill, deploy, network partition |
 | Checkpoint destruction (a button) | A lost volume, a corrupted cursor, a truncated table |
 | Wall-clock pacing (`backfillSpeed`) | Whatever throughput the database sustains |
+| WhatsApp delivery (`DemoWhatsAppProvider`) | A real messaging API, credentials, and a delivery webhook |
+| Patient phone numbers (derived from the id) | Real contact details, stored and access-controlled |
 
 The simulation is also **biased toward contention**: automatic updates preferentially target records currently
 in flight, because that is the only window in which the guard can be exercised. Under uniform random targeting
@@ -410,6 +568,11 @@ The version-guarded write, the compute-then-write pipeline with a durable stagin
 recovery boundary, the consideration ledger as a coverage proof, bounded re-evaluation with a real failure
 outcome, and the independent audit reading persisted state. These would transfer unchanged.
 
+The notification layer's *structure* transfers too: the port, the decorator on the single guarded-write choke
+point, the idempotency key under a unique constraint, and the rule that a send is reachable only from an applied
+guarded write. Swapping the demo provider for a real one is a new class implementing `WhatsAppProvider` and a
+branch in `selectWhatsAppProvider` — nothing in the domain, the engines or the dashboard changes.
+
 ### Deliberate omissions
 
 - **No authentication or authorization.** Single-user demo; there is no user model at all.
@@ -421,6 +584,12 @@ outcome, and the independent audit reading persisted state. These would transfer
 - **SQLite, single writer.** The version predicate is identical under Postgres, but the transaction-isolation
   characteristics are not and would want re-testing.
 - **No rate limiting** beyond a bounded request body size and a per-socket resync throttle.
+- **No notification delivery tracking.** There is no `DELIVERED` status because the demo provider cannot know
+  it. A real integration would add the state together with the webhook that justifies it, and only then could
+  the success rate mean "delivered" rather than "accepted by the provider".
+- **No notification retry or backoff.** A `FAILED` alert stays failed and is reported. Retrying safely needs a
+  durable outbox worker, and a naive in-process retry inside the tick loop would slow the run and risk
+  duplicate sends across a crash.
 - **Three npm advisories remain**, all in `deepmerge-ts` reached through `@prisma/config` — a Prisma **CLI**
   devDependency, absent from the runtime client and from any shipped bundle. npm's suggested fix downgrades the
   Prisma CLI to a version that no longer matches the generated client, which would break the build. Accepted
